@@ -32,4 +32,20 @@ async function list({ activeOnly = true } = {}) {
   return rows;
 }
 
-module.exports = { createHospital, findById, list };
+// Straight-line pre-sort from a given origin -- mirrors dispatchService's
+// preFilterCandidates (cheap DB-level Haversine first, OSRM refines after).
+// Used to rank hospitals for the crew's destination picker instead of
+// handing back an unordered list (see dispatchService.rankHospitals).
+async function listWithDistanceFrom(lat, lng, { activeOnly = true } = {}) {
+  const [rows] = await pool.query(
+    `SELECT id, name, ${latLngColumns('location')}, address, contact_phone,
+       ST_Distance_Sphere(location, ST_SRID(POINT(:lat, :lng), 4326)) AS haversine_meters
+     FROM hospitals
+     ${activeOnly ? 'WHERE active = 1' : ''}
+     ORDER BY haversine_meters ASC`,
+    { lat, lng }
+  );
+  return rows;
+}
+
+module.exports = { createHospital, findById, list, listWithDistanceFrom };

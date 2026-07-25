@@ -125,7 +125,7 @@ async function renderMissionView() {
 
   initMissionMap(inc.lat, inc.lng);
   loadRoute();
-  if (needsHospitalPicker) await populateHospitalPicker();
+  if (needsHospitalPicker) await populateHospitalPicker(inc.id);
 
   const btn = document.getElementById('status-btn');
   if (nextAction) {
@@ -165,12 +165,27 @@ async function loadRoute() {
   }
 }
 
-async function populateHospitalPicker() {
+async function populateHospitalPicker(incidentId) {
   const select = document.getElementById('hospital-picker');
   if (!select) return;
   try {
-    const { hospitals } = await apiGet('/api/hospitals');
-    select.innerHTML = hospitals.map((h) => `<option value="${h.id}">${escapeHtml(h.name)}</option>`).join('');
+    const { hospitals, routingSource } = await apiGet(`/api/incidents/${incidentId}/hospitals`);
+    // Ranked nearest-first by real road ETA (or a flagged straight-line
+    // fallback if OSRM is unreachable) -- not just an alphabetical list,
+    // so the crew's default choice is the actually-closest hospital.
+    select.innerHTML = hospitals
+      .map((h) => {
+        const label =
+          routingSource === 'osrm' && h.etaSeconds !== null
+            ? `${h.name} (~${Math.round(h.etaSeconds / 60)} min)`
+            : `${h.name} (${(h.distanceMeters / 1000).toFixed(1)} km)`;
+        return `<option value="${h.hospitalId}">${escapeHtml(label)}</option>`;
+      })
+      .join('');
+    if (routingSource === 'haversine_fallback') {
+      const errorBox = document.getElementById('route-error');
+      if (errorBox) errorBox.innerHTML = '<p class="error-banner">Road-routing unavailable -- hospital distances are straight-line estimates.</p>';
+    }
   } catch (err) {
     const errorBox = document.getElementById('route-error');
     if (errorBox) errorBox.innerHTML = `<p class="error-banner">Could not load hospitals: ${escapeHtml(err.message)}</p>`;

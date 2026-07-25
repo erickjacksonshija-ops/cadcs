@@ -207,4 +207,51 @@ describe('crew mission flow (integration)', () => {
     const res = await dispatcherAgent.post(`/api/incidents/${incidentId}/status`).send({ status: 'en_route' });
     expect(res.status).toBe(403);
   });
+
+  it('ranks destination hospitals nearest-first by real OSRM ETA from the ambulance position', async () => {
+    const { crewAgent, providerId, incidentId, hospitalId } = await setup();
+    // setup()'s 'Test Hospital' sits ~1.2km from AMBULANCE_LOCATION; add a
+    // second hospital far across the region so ranking is unambiguous.
+    const [farHospitalResult] = await pool.query(
+      `INSERT INTO hospitals (name, location, address) VALUES ('Far Hospital', ST_SRID(POINT(-9.05, 33.6), 4326), 'Songwe')`
+    );
+    const farHospitalId = farHospitalResult.insertId;
+
+    const res = await crewAgent.get(`/api/incidents/${incidentId}/hospitals`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.routingSource).toBe('osrm');
+    expect(res.body.hospitals.map((h) => h.hospitalId)).toEqual([hospitalId, farHospitalId]);
+    expect(res.body.hospitals[0].etaSeconds).toBeLessThan(res.body.hospitals[1].etaSeconds);
+    expect(providerId).toBeTruthy();
+  });
+
+  it('rejects fetching ranked hospitals for an incident not assigned to the requesting crew', async () => {
+    const { incidentId, providerId } = await setup();
+
+    await userService.createUser({
+      name: 'Other Crew',
+      email: 'othercrew3@test.local',
+      password: 'password-123',
+      role: ROLES.CREW,
+      providerId,
+    });
+    await pool.query(
+      `INSERT INTO ambulances (provider_id, call_sign, capability_level, status, current_location, last_ping_at, current_crew_user_id)
+       VALUES (:providerId, 'MB-03', 'ALS', 'available', ST_SRID(POINT(-8.9, 33.45), 4326), NOW(),
+         (SELECT id FROM users WHERE email = 'othercrew3@test.local'))`,
+      { providerId }
+    );
+    const otherAgent = request.agent(app);
+    await otherAgent.post('/api/auth/login').send({ email: 'othercrew3@test.local', password: 'password-123' });
+
+    const res = await otherAgent.get(`/api/incidents/${incidentId}/hospitals`);
+    expect(res.status).toBe(403);
+  });
+
+  it('blocks a dispatcher from ranking hospitals (crew-only endpoint)', async () => {
+    const { dispatcherAgent, incidentId } = await setup();
+    const res = await dispatcherAgent.get(`/api/incidents/${incidentId}/hospitals`);
+    expect(res.status).toBe(403);
+  });
 });

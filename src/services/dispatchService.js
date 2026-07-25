@@ -3,6 +3,8 @@ const { latLngColumns } = require('./geo');
 const routingService = require('./routingService');
 const auditService = require('./auditService');
 const incidentService = require('./incidentService');
+const ambulanceService = require('./ambulanceService');
+const hospitalService = require('./hospitalService');
 const notificationService = require('./notificationService');
 const { tryGetIo } = require('../sockets/ioRegistry');
 const { DISPATCHERS_ROOM, crewRoom, hospitalRoom } = require('../sockets/rooms');
@@ -119,6 +121,63 @@ async function rankCandidates(incidentId) {
   });
 
   return { candidates, routingSource };
+}
+
+// Ranked hospital list for the crew's destination picker when starting
+// transport -- same "real road ETA, not just an unordered list" philosophy
+// as rankCandidates, applied in the other direction. Origin is the
+// ambulance's own live GPS position (most accurate -- it's what actually
+// determines travel time), falling back to the incident's location if the
+// ambulance has no GPS fix yet. Same OSRM-down fallback behavior as
+// rankCandidates: degrade to Haversine distance, never fail the flow.
+async function rankHospitals(incidentId) {
+  const incident = await incidentService.findById(incidentId);
+  if (!incident) throw new ValidationError('Incident not found');
+  if (!incident.assigned_ambulance_id) {
+    throw new ValidationError('Incident has no assigned ambulance yet');
+  }
+
+  const ambulance = await ambulanceService.findById(incident.assigned_ambulance_id);
+  const origin =
+    ambulance && ambulance.lat !== null && ambulance.lng !== null
+      ? { lat: ambulance.lat, lng: ambulance.lng }
+      : { lat: incident.lat, lng: incident.lng };
+
+  const hospitals = await hospitalService.listWithDistanceFrom(origin.lat, origin.lng);
+  if (hospitals.length === 0) {
+    return { hospitals: [], routingSource: 'none' };
+  }
+
+  let routingSource = 'osrm';
+  let ranked;
+  try {
+    const routed = await routingService.getDurationsAndDistances(
+      origin,
+      hospitals.map((h) => ({ lat: h.lat, lng: h.lng }))
+    );
+    ranked = hospitals
+      .map((h, i) => ({
+        hospitalId: h.id,
+        name: h.name,
+        address: h.address,
+        etaSeconds: routed[i].durationSeconds,
+        distanceMeters: routed[i].distanceMeters,
+      }))
+      .sort((a, b) => a.etaSeconds - b.etaSeconds);
+  } catch (err) {
+    if (!(err instanceof routingService.OsrmUnavailableError)) throw err;
+    routingSource = 'haversine_fallback';
+    // hospitals is already ordered by haversine_meters ascending from the query.
+    ranked = hospitals.map((h) => ({
+      hospitalId: h.id,
+      name: h.name,
+      address: h.address,
+      etaSeconds: null,
+      distanceMeters: h.haversine_meters,
+    }));
+  }
+
+  return { hospitals: ranked, routingSource };
 }
 
 // Atomic compare-and-swap: an ambulance can only be assigned if it is
@@ -384,6 +443,7 @@ async function cancelIncident(incidentId, dispatcherUserId, reason) {
 
 module.exports = {
   rankCandidates,
+  rankHospitals,
   assignAmbulance,
   updateMissionStatus,
   cancelIncident,

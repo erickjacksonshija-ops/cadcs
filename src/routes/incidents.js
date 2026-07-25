@@ -129,6 +129,39 @@ router.get(
   }
 );
 
+// Ranked destination-hospital candidates for the crew's transport picker
+// (real road-network ETA from the ambulance's current position, or a
+// flagged Haversine fallback if OSRM is unreachable) -- mirrors
+// /:id/candidates' ranking philosophy, applied to hospital selection
+// instead of ambulance selection. Read-only -- does not set the incident's
+// destination hospital.
+router.get(
+  '/:id/hospitals',
+  requireRole(ROLES.CREW),
+  param('id').isInt(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const ambulanceId = await findCurrentAmbulanceForCrew(req.session.user.id);
+      if (!ambulanceId) return res.status(403).json({ error: 'You have no assigned ambulance' });
+
+      const incident = await incidentService.findById(req.params.id);
+      if (!incident) return res.status(404).json({ error: 'Incident not found' });
+      if (incident.assigned_ambulance_id !== ambulanceId) {
+        return res.status(403).json({ error: 'This incident is not assigned to your ambulance' });
+      }
+
+      const result = await dispatchService.rankHospitals(req.params.id);
+      res.json(result);
+    } catch (err) {
+      if (err instanceof dispatchService.ValidationError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      next(err);
+    }
+  }
+);
+
 // Confirms dispatch of a specific ambulance -- the dispatcher's decision,
 // informed by (but not bound to) the ranked candidate list. Atomic
 // compare-and-swap under the hood (see dispatchService) so two dispatchers
