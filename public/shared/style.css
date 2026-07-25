@@ -1,0 +1,103 @@
+:root {
+  --color-bg: #0f172a;
+  --color-panel: #1e293b;
+  --color-panel-light: #334155;
+  --color-border: #334155;
+  --color-text: #e2e8f0;
+  --color-text-dim: #94a3b8;
+  --color-accent: #38bdf8;
+  --color-p1: #ef4444;
+  --color-p2: #f59e0b;
+  --color-p3: #22c55e;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --radius: 6px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.5rem 1rem;
+  background: var(--color-accent);
+  color: #08202f;
+  font-weight: 600;
+}
+button:hover { filter: brightness(1.1); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.secondary { background: var(--color-panel-light); color: var(--color-text); }
+button.danger { background: var(--color-danger); color: white; }
+
+input, select, textarea {
+  font-family: inherit;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  border-radius: var(--radius);
+  padding: 0.45rem 0.6rem;
+  width: 100%;
+}
+
+label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--color-text-dim);
+  margin: 0.6rem 0 0.25rem;
+}
+
+.field-row { display: flex; gap: 0.5rem; }
+.field-row > * { flex: 1; }
+
+.checkbox-row { display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0; }
+.checkbox-row input { width: auto; }
+.checkbox-row label { margin: 0; color: var(--color-text); font-size: 0.9rem; }
+
+.panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.badge-p1 { background: var(--color-p1); color: white; }
+.badge-p2 { background: var(--color-p2); color: #1a1300; }
+.badge-p3 { background: var(--color-p3); color: #04210c; }
+
+.error-banner {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid var(--color-danger);
+  color: #fecaca;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.muted { color: var(--color-text-dim); font-size: 0.85rem; }
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 1rem;
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-border);
+}
+.topbar h1 { font-size: 1rem; margin: 0; }

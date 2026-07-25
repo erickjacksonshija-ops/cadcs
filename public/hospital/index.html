@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CADCS - Hospital Portal</title>
+  <link rel="stylesheet" href="/shared/style.css" />
+  <link rel="stylesheet" href="/hospital/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <h1>CADCS Hospital Portal</h1>
+    <div>
+      <span id="user-name" class="muted"></span>
+      <button class="secondary" id="logout-btn" style="margin-left: 0.75rem;">Sign out</button>
+    </div>
+  </div>
+
+  <div id="app-content" class="content">
+    <p class="muted">Loading...</p>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/shared/api.js"></script>
+  <script src="/hospital/app.js"></script>
+</body>
+</html>

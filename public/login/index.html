@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CADCS - Sign In</title>
+  <link rel="stylesheet" href="/shared/style.css" />
+  <style>
+    html, body { height: 100%; }
+    body { display: flex; }
+
+    .hero {
+      flex: 1.3;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 4rem 4.5rem;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.16), transparent 45%),
+        radial-gradient(circle at 80% 75%, rgba(239, 68, 68, 0.12), transparent 40%),
+        linear-gradient(160deg, #0b1220 0%, #0f172a 55%, #111c33 100%);
+      overflow: hidden;
+    }
+    .hero::before {
+      /* Faint dot-grid, evocative of a dispatch map without being a literal image */
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(rgba(148, 163, 184, 0.18) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: radial-gradient(circle at 30% 40%, black, transparent 75%);
+    }
+    .hero-content { position: relative; max-width: 460px; }
+    .hero-eyebrow {
+      display: inline-block;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--color-accent);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      background: rgba(56, 189, 248, 0.08);
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      margin-bottom: 1.25rem;
+    }
+    .hero h1 { font-size: 2.4rem; line-height: 1.15; margin: 0 0 0.9rem; letter-spacing: -0.01em; }
+    .hero p.lede { color: var(--color-text-dim); font-size: 1.05rem; line-height: 1.6; margin: 0 0 2.25rem; }
+    .hero-features { display: flex; flex-direction: column; gap: 1rem; }
+    .hero-feature { display: flex; align-items: flex-start; gap: 0.75rem; }
+    .hero-feature .dot {
+      flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--color-accent); margin-top: 0.45rem;
+    }
+    .hero-feature .text { font-size: 0.92rem; color: #cbd5e1; line-height: 1.5; }
+    .hero-feature .text strong { color: var(--color-text); }
+
+    .form-side {
+      flex: 1;
+      min-width: 380px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .login-box { width: 420px; padding: 2.25rem 2.5rem; }
+    .login-box h2 { font-size: 1.6rem; margin: 0 0 0.35rem; }
+    .login-box p.subtitle { color: var(--color-text-dim); font-size: 0.95rem; margin: 0 0 1.75rem; }
+    .login-box label { font-size: 0.85rem; margin: 1rem 0 0.35rem; }
+    .login-box input { padding: 0.75rem 0.85rem; font-size: 1rem; }
+    .login-box button { width: 100%; margin-top: 1.5rem; padding: 0.75rem 1rem; font-size: 1rem; }
+
+    @media (max-width: 860px) {
+      body { flex-direction: column; }
+      .hero { flex: none; padding: 2.5rem 1.75rem; }
+      .hero h1 { font-size: 1.6rem; }
+      .hero p.lede { font-size: 0.95rem; margin-bottom: 1.5rem; }
+      .hero-features { display: none; }
+      .form-side { flex: none; min-width: 0; padding: 2rem 1.5rem 3rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <div class="hero-content">
+      <span class="hero-eyebrow">Mbeya Region &middot; Emergency Medical Services</span>
+      <h1>CADCS</h1>
+      <p class="lede">Centralized Ambulance Dispatch &amp; Command System &mdash; coordinating every registered ambulance provider, hospital, and dispatcher on one live platform.</p>
+      <div class="hero-features">
+        <div class="hero-feature">
+          <span class="dot"></span>
+          <span class="text"><strong>Real road-network dispatch.</strong> Nearest-ambulance ranking runs on actual street routing, not straight-line guesses.</span>
+        </div>
+        <div class="hero-feature">
+          <span class="dot"></span>
+          <span class="text"><strong>Cross-provider visibility.</strong> Every registered ambulance, regardless of owner, is coordinated from a single live map.</span>
+        </div>
+        <div class="hero-feature">
+          <span class="dot"></span>
+          <span class="text"><strong>Hospital pre-notification.</strong> Receiving facilities see incoming patients and real ETAs before the ambulance arrives.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-side">
+    <div class="panel login-box">
+      <h2>Sign in</h2>
+      <p class="subtitle">Use the account provided by your administrator.</p>
+      <div id="error" style="display:none" class="error-banner"></div>
+      <form id="login-form">
+        <label for="email">Email</label>
+        <input id="email" type="email" required autocomplete="username" />
+        <label for="password">Password</label>
+        <input id="password" type="password" required autocomplete="current-password" />
+        <button type="submit">Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="/shared/api.js"></script>
+  <script src="/shared/passwordToggle.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

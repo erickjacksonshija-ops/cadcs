@@ -1,0 +1,63 @@
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; }
+
+.app-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 260px 1fr 340px;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  min-height: 0;
+}
+
+.sidebar-left, .sidebar-right {
+  overflow-y: auto;
+}
+
+#map {
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  cursor: default;
+}
+#map.pin-mode { cursor: crosshair; }
+
+.incident-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.5rem;
+  margin-top: 0.5rem;
+  cursor: pointer;
+  background: var(--color-bg);
+}
+.incident-card:hover { border-color: var(--color-accent); }
+.incident-card.selected { border-color: var(--color-accent); background: var(--color-panel-light); }
+.incident-card .top-row { display: flex; justify-content: space-between; align-items: center; }
+.incident-card .status { font-size: 0.75rem; color: var(--color-text-dim); text-transform: uppercase; }
+
+.candidate-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.5rem;
+  margin-top: 0.4rem;
+}
+.candidate-row .meta { font-size: 0.8rem; color: var(--color-text-dim); }
+
+.section-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-dim);
+  margin: 0.9rem 0 0.3rem;
+}
+
+.pin-hint {
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid var(--color-accent);
+  color: #bae6fd;
+  padding: 0.5rem;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+}

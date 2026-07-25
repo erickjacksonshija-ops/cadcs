@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CADCS - Admin</title>
+  <link rel="stylesheet" href="/shared/style.css" />
+  <link rel="stylesheet" href="/admin/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <h1>CADCS Admin</h1>
+    <div>
+      <span id="user-name" class="muted"></span>
+      <button class="secondary" id="logout-btn" style="margin-left: 0.75rem;">Sign out</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="providers">Providers</button>
+    <button class="tab-btn" data-tab="hospitals">Hospitals</button>
+    <button class="tab-btn" data-tab="ambulances">Ambulances</button>
+    <button class="tab-btn" data-tab="users">Users</button>
+    <button class="tab-btn" data-tab="analytics">Analytics</button>
+  </div>
+
+  <div id="app-content" class="content">
+    <p class="muted">Loading...</p>
+  </div>
+
+  <script src="/shared/api.js"></script>
+  <script src="/shared/passwordToggle.js"></script>
+  <script src="/admin/app.js"></script>
+</body>
+</html>

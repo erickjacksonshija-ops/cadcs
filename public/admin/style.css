@@ -1,0 +1,58 @@
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem 0;
+}
+.tab-btn {
+  background: var(--color-panel);
+  color: var(--color-text-dim);
+  border: 1px solid var(--color-border);
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.tab-btn.active {
+  background: var(--color-panel-light);
+  color: var(--color-text);
+}
+
+.content {
+  padding: 1rem;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+th, td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+}
+th { color: var(--color-text-dim); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; }
+
+form button { width: 100%; margin-top: 0.75rem; }
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.stat-tile { text-align: center; }
+.stat-tile .value { font-size: 1.8rem; font-weight: 700; color: var(--color-accent); }
+.stat-tile .label { font-size: 0.75rem; color: var(--color-text-dim); text-transform: uppercase; margin-top: 0.25rem; }
+.stat-tile.good .value { color: var(--color-success); }
+.stat-tile.bad .value { color: var(--color-danger); }
+
+.bar-row { display: flex; align-items: center; gap: 0.6rem; margin: 0.4rem 0; font-size: 0.85rem; }
+.bar-row .bar-label { width: 140px; flex-shrink: 0; color: var(--color-text-dim); }
+.bar-row .bar-track { flex: 1; background: var(--color-bg); border-radius: 4px; height: 10px; overflow: hidden; }
+.bar-row .bar-fill { height: 100%; background: var(--color-accent); }
+.bar-row .bar-count { width: 30px; text-align: right; }

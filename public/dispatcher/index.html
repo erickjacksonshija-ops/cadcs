@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CADCS - Dispatcher</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="/shared/style.css" />
+  <link rel="stylesheet" href="/dispatcher/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <h1>CADCS Dispatcher</h1>
+    <div>
+      <span id="user-name" class="muted"></span>
+      <button class="secondary" id="logout-btn" style="margin-left: 0.75rem;">Sign out</button>
+    </div>
+  </div>
+
+  <div class="app-layout">
+    <aside class="sidebar-left panel">
+      <button id="new-incident-btn">+ New Incident</button>
+      <div class="muted" style="margin-top: 0.75rem;">Active incidents</div>
+      <div id="incidents-list"></div>
+    </aside>
+
+    <div id="map"></div>
+
+    <aside class="sidebar-right panel" id="context-panel">
+      <p class="muted">Select an incident, or create a new one, to see details here.</p>
+    </aside>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/shared/api.js"></script>
+  <script src="/dispatcher/app.js"></script>
+</body>
+</html>
