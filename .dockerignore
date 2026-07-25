@@ -1,0 +1,14 @@
+node_modules
+.env
+.env.test
+*.log
+npm-debug.log*
+coverage
+osrm-data
+nominatim-data
+mysql-data
+backups
+dist
+.git
+.DS_Store
+Thumbs.db
