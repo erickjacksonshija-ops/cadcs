@@ -49,7 +49,16 @@ services:
   # scope anyway (simulated test scenarios, not nationwide coverage).
   # osrm-routed just serves the preprocessed result.
   osrm:
-    image: osrm/osrm-backend
+    # Pinned by digest, not just ':latest' -- osrm/osrm-backend is amd64-only
+    # and hasn't been repushed in years, which is fine for an amd64 deploy
+    # target (e.g. GitHub Codespaces) but would silently break on an ARM
+    # host. Verified: this exact image reads our committed osrm-data/
+    # (prepared with OSRM 5.26.0) correctly. If deploying to an ARM host
+    # later, ghcr.io/project-osrm/osrm-backend has real arm64 support but
+    # uses a newer on-disk data format (5.27.1) incompatible with the
+    # committed .osrm files -- would need osrm-extract/partition/customize
+    # re-run against that image first, not a drop-in swap.
+    image: osrm/osrm-backend@sha256:af5d4a83fb90086a43b1ae2ca22872e6768766ad5fcbb07a29ff90ec644ee409
     restart: unless-stopped
     command: osrm-routed --algorithm mld /data/mbeya-latest.osrm
     ports:

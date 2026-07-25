@@ -4,7 +4,11 @@ node_modules/
 *.log
 npm-debug.log*
 coverage/
-osrm-data/
+# The preprocessed Mbeya routing data (osrm-data/mbeya-latest.*, ~58MB) IS
+# committed -- Codespaces/fresh clones need it immediately with no rebuild
+# step or OSM-download dependency at demo time. Only the raw full-country
+# source extract (not needed at runtime, ~670MB) is excluded.
+osrm-data/tanzania-latest.osm.pbf
 nominatim-data/
 mysql-data/
 backups/
