@@ -145,4 +145,99 @@ describe('auth + admin provisioning (integration)', () => {
     expect(res.status).toBe(400);
     expect(res.body.error).not.toMatch(/CONSTRAINT|SQL|fk_/i);
   });
+
+  // Fallback auth path for hosting environments where the session cookie
+  // never reaches the browser at all (verified: GitHub Codespaces' port
+  // forwarding). Uses plain `request(app)`, not `request.agent(app)` --
+  // no cookie jar at all, only the Authorization header, to prove this
+  // path works with zero reliance on cookies.
+  describe('Authorization-header token fallback', () => {
+    it('login response includes a token, and it authenticates requests with no cookie at all', async () => {
+      await userService.createUser({
+        name: 'Token User',
+        email: 'tokenuser@test.local',
+        password: 'correct-password-1',
+        role: ROLES.ADMIN,
+      });
+
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'tokenuser@test.local', password: 'correct-password-1' });
+      expect(loginRes.status).toBe(200);
+      expect(typeof loginRes.body.token).toBe('string');
+
+      const meRes = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${loginRes.body.token}`);
+      expect(meRes.status).toBe(200);
+      expect(meRes.body.user.name).toBe('Token User');
+    });
+
+    it('rejects a tampered token', async () => {
+      await userService.createUser({
+        name: 'Token User Two',
+        email: 'tokenuser2@test.local',
+        password: 'correct-password-1',
+        role: ROLES.ADMIN,
+      });
+
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'tokenuser2@test.local', password: 'correct-password-1' });
+
+      const tampered = loginRes.body.token.slice(0, -1) + (loginRes.body.token.endsWith('a') ? 'b' : 'a');
+      const meRes = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${tampered}`);
+      expect(meRes.status).toBe(401);
+    });
+
+    it('logout via token invalidates it', async () => {
+      await userService.createUser({
+        name: 'Token User Three',
+        email: 'tokenuser3@test.local',
+        password: 'correct-password-1',
+        role: ROLES.ADMIN,
+      });
+
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'tokenuser3@test.local', password: 'correct-password-1' });
+      const { token } = loginRes.body;
+
+      const logoutRes = await request(app).post('/api/auth/logout').set('Authorization', `Bearer ${token}`);
+      expect(logoutRes.status).toBe(204);
+
+      const meRes = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
+      expect(meRes.status).toBe(401);
+    });
+
+    it('enforces RBAC identically over the token path', async () => {
+      const [providerResult] = await pool.query(
+        "INSERT INTO providers (name, type) VALUES ('Test Provider', 'private')"
+      );
+      await userService.createUser({
+        name: 'Token Dispatcher',
+        email: 'tokendispatcher@test.local',
+        password: 'password-123',
+        role: ROLES.DISPATCHER,
+        providerId: providerResult.insertId,
+      });
+
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'tokendispatcher@test.local', password: 'password-123' });
+
+      const res = await request(app)
+        .post('/api/admin/users')
+        .set('Authorization', `Bearer ${loginRes.body.token}`)
+        .send({
+          name: 'Should Not Be Created',
+          email: 'nope2@test.local',
+          password: 'password-123',
+          role: 'dispatcher',
+          providerId: providerResult.insertId,
+        });
+
+      expect(res.status).toBe(403);
+    });
+  });
 });

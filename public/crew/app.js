@@ -55,7 +55,7 @@ function registerServiceWorker() {
 }
 
 function initSocket() {
-  socket = io();
+  socket = io({ auth: { token: getToken() } });
 
   socket.on('mission:assigned', (incident) => {
     currentIncident = incident;

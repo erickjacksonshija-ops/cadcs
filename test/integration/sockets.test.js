@@ -26,6 +26,17 @@ function connectClient(cookie) {
   });
 }
 
+// No cookie at all -- proves the socket auth path works purely off the
+// Authorization-token fallback, for environments that never deliver the
+// session cookie (see sessionTokenService).
+function connectClientWithToken(token) {
+  return ioClient(baseUrl, {
+    auth: { token },
+    transports: ['websocket'],
+    reconnection: false,
+  });
+}
+
 function waitForEvent(socket, event, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Timed out waiting for '${event}'`)), timeoutMs);
@@ -80,6 +91,28 @@ describe('Socket.IO real-time layer (integration)', () => {
     const cookie = sessionCookieFrom(loginRes);
 
     const client = connectClient(cookie);
+    await waitForEvent(client, 'connect');
+    expect(client.connected).toBe(true);
+    client.close();
+  });
+
+  it('authenticates a dispatcher socket off the Authorization token, with no cookie at all', async () => {
+    const [providerResult] = await pool.query(
+      "INSERT INTO providers (name, type) VALUES ('Test Provider', 'private')"
+    );
+    await userService.createUser({
+      name: 'Token Dispatcher',
+      email: 'tokendispatcher@test.local',
+      password: 'password-123',
+      role: ROLES.DISPATCHER,
+      providerId: providerResult.insertId,
+    });
+
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'tokendispatcher@test.local', password: 'password-123' });
+
+    const client = connectClientWithToken(loginRes.body.token);
     await waitForEvent(client, 'connect');
     expect(client.connected).toBe(true);
     client.close();

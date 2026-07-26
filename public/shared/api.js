@@ -3,15 +3,32 @@
 // credentials:'include' is set explicitly rather than relying on default
 // behavior, since default cross-origin credential handling has changed
 // across browsers over the years.
+// Cookie auth is the primary path and needs nothing here (credentials:
+// 'include' below covers it). This token is a same-security-model fallback
+// for hosting environments that never deliver the session cookie to the
+// browser at all -- verified: GitHub Codespaces' port-forwarding relay
+// strips Set-Cookie from the origin app entirely, in both public and
+// private modes. sessionStorage (not localStorage) so it doesn't outlive
+// the tab and isn't shared across tabs. See src/services/sessionTokenService.js
+// for the server side.
+const TOKEN_KEY = 'cadcs_token';
+const getToken = () => sessionStorage.getItem(TOKEN_KEY);
+const clearToken = () => sessionStorage.removeItem(TOKEN_KEY);
+
 async function api(method, path, body) {
+  const headers = body ? { 'Content-Type': 'application/json' } : {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
   const res = await fetch(path, {
     method,
     credentials: 'include',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
 
   if (res.status === 401) {
+    clearToken();
     window.location.href = '/';
     throw new Error('Not authenticated');
   }
@@ -29,6 +46,12 @@ async function api(method, path, body) {
     err.status = res.status;
     err.details = data && data.details;
     throw err;
+  }
+
+  if (path === '/api/auth/login' && data && data.token) {
+    sessionStorage.setItem(TOKEN_KEY, data.token);
+  } else if (path === '/api/auth/logout') {
+    clearToken();
   }
 
   return data;

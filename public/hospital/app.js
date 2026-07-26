@@ -30,7 +30,7 @@ async function init() {
 }
 
 function initSocket() {
-  socket = io();
+  socket = io({ auth: { token: getToken() } });
 
   socket.on('hospital:notified', (payload) => {
     notifications.set(payload.notificationId, {

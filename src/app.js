@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const session = require('express-session');
 const env = require('./config/env');
 const sessionStore = require('./config/sessionStore');
+const tokenFallbackAuth = require('./middleware/tokenFallbackAuth');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const incidentRoutes = require('./routes/incidents');
@@ -61,6 +62,7 @@ function createApp() {
       },
     })
   );
+  app.use(tokenFallbackAuth);
 
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', env: env.nodeEnv });

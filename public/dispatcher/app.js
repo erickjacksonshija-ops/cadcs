@@ -66,7 +66,7 @@ function initMap() {
 }
 
 function initSocket() {
-  socket = io();
+  socket = io({ auth: { token: getToken() } });
 
   socket.on('ambulance:location', ({ ambulanceId, lat, lng, status }) => {
     staleAmbulanceIds.delete(ambulanceId);

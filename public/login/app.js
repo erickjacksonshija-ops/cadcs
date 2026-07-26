@@ -29,7 +29,13 @@ form.addEventListener('submit', async (e) => {
 // plain fetch (not the shared api() helper) because api() redirects to
 // '/' on 401 -- which is exactly where we already are, so that
 // redirect behavior would be redundant/wasteful on this specific page.
-fetch('/api/auth/me', { credentials: 'include' })
+// Includes the Authorization header manually for the same reason api()
+// needs it -- see shared/api.js.
+const existingToken = sessionStorage.getItem('cadcs_token');
+fetch('/api/auth/me', {
+  credentials: 'include',
+  headers: existingToken ? { Authorization: `Bearer ${existingToken}` } : undefined,
+})
   .then((res) => (res.ok ? res.json() : null))
   .then((data) => {
     if (data) window.location.href = ROLE_HOME[data.user.role] || '/';

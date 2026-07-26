@@ -3,6 +3,7 @@ const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const userService = require('../services/userService');
 const requireAuth = require('../middleware/requireAuth');
+const sessionTokenService = require('../services/sessionTokenService');
 const env = require('../config/env');
 
 const router = express.Router();
@@ -50,14 +51,33 @@ router.post(
         hospitalId: user.hospital_id,
       };
 
-      res.json({ user: req.session.user });
+      // Session must actually be persisted to the store before handing out
+      // a token that references it -- a client could use the token on its
+      // very next request.
+      req.session.save((err) => {
+        if (err) return next(err);
+        res.json({
+          user: req.session.user,
+          token: sessionTokenService.signSessionId(req.sessionID),
+        });
+      });
     } catch (err) {
       next(err);
     }
   }
 );
 
-router.post('/logout', requireAuth, (req, res, next) => {
+router.post('/logout', requireAuth, async (req, res, next) => {
+  // Reached via the Authorization-header fallback (see tokenFallbackAuth) --
+  // req.session here is a throwaway per-request object, not the real
+  // cookie-backed session, so destroy the actual session the token pointed
+  // to directly instead.
+  if (req.tokenSessionId) {
+    const header = req.headers.authorization;
+    await sessionTokenService.destroyToken(header.slice('Bearer '.length));
+    return res.status(204).end();
+  }
+
   req.session.destroy((err) => {
     if (err) return next(err);
     res.clearCookie('connect.sid');
