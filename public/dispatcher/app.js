@@ -14,6 +14,15 @@ const AMBULANCE_COLORS = {
   out_of_service: '#64748b',
   stale: '#ef4444',
 };
+const AMBULANCE_STATUS_LABELS = {
+  available: 'Available',
+  dispatched: 'Dispatched',
+  en_route: 'En Route',
+  on_scene: 'On Scene',
+  transporting: 'Transporting',
+  at_hospital: 'At Hospital',
+  out_of_service: 'Out of Service',
+};
 
 let currentUser = null;
 let map = null;
@@ -21,6 +30,7 @@ let socket = null;
 let incidents = new Map(); // id -> incident
 let incidentMarkers = new Map(); // id -> L.CircleMarker
 let ambulanceMarkers = new Map(); // ambulanceId -> L.CircleMarker
+let ambulanceMeta = new Map(); // ambulanceId -> { callSign, capabilityLevel } -- events that only carry a status (e.g. ambulance:status_changed) still need this to rebuild a full tooltip
 let staleAmbulanceIds = new Set();
 let selectedIncidentId = null;
 let pinMode = false;
@@ -68,21 +78,27 @@ function initMap() {
 function initSocket() {
   socket = io({ auth: { token: getToken() } });
 
-  socket.on('ambulance:location', ({ ambulanceId, lat, lng, status }) => {
+  socket.on('ambulance:location', ({ ambulanceId, lat, lng, status, callSign, capabilityLevel }) => {
     staleAmbulanceIds.delete(ambulanceId);
-    upsertAmbulanceMarker(ambulanceId, lat, lng, status || 'available');
+    upsertAmbulanceMarker(ambulanceId, lat, lng, status || 'available', { callSign, capabilityLevel });
   });
 
   socket.on('ambulance:signal_lost', ({ ambulanceId }) => {
     staleAmbulanceIds.add(ambulanceId);
     const marker = ambulanceMarkers.get(ambulanceId);
-    if (marker) marker.setStyle({ color: AMBULANCE_COLORS.stale, fillColor: AMBULANCE_COLORS.stale });
+    if (marker) {
+      marker.setStyle({ color: AMBULANCE_COLORS.stale, fillColor: AMBULANCE_COLORS.stale });
+      marker.setTooltipContent(ambulanceTooltipText(ambulanceId));
+    }
   });
 
   socket.on('ambulance:signal_restored', ({ ambulanceId }) => {
     staleAmbulanceIds.delete(ambulanceId);
     const marker = ambulanceMarkers.get(ambulanceId);
-    if (marker) marker.setStyle({ color: AMBULANCE_COLORS.available, fillColor: AMBULANCE_COLORS.available });
+    if (marker) {
+      marker.setStyle({ color: AMBULANCE_COLORS.available, fillColor: AMBULANCE_COLORS.available });
+      marker.setTooltipContent(ambulanceTooltipText(ambulanceId, 'available'));
+    }
   });
 
   socket.on('ambulance:status_changed', ({ ambulanceId, status }) => {
@@ -90,6 +106,7 @@ function initSocket() {
     if (marker && !staleAmbulanceIds.has(ambulanceId)) {
       const color = AMBULANCE_COLORS[status] || AMBULANCE_COLORS.available;
       marker.setStyle({ color, fillColor: color });
+      marker.setTooltipContent(ambulanceTooltipText(ambulanceId, status));
     }
     // A status change on the assigned ambulance usually means the
     // incident's own status changed too -- refresh if it's the one open.
@@ -126,8 +143,24 @@ function initSocket() {
   });
 }
 
-function upsertAmbulanceMarker(ambulanceId, lat, lng, status) {
+function ambulanceTooltipText(ambulanceId, status) {
+  const meta = ambulanceMeta.get(ambulanceId) || {};
+  const label = staleAmbulanceIds.has(ambulanceId)
+    ? 'Signal lost'
+    : (AMBULANCE_STATUS_LABELS[status] || status || 'Unknown');
+  const name = meta.callSign
+    ? `${escapeHtml(meta.callSign)}${meta.capabilityLevel ? ` (${escapeHtml(meta.capabilityLevel)})` : ''}`
+    : `Ambulance #${ambulanceId}`;
+  return `${name} &mdash; ${escapeHtml(label)}`;
+}
+
+// meta (callSign/capabilityLevel) is optional -- events that only report a
+// status change (not the full REST/GPS payload) can omit it and this
+// falls back to whatever was already known for that ambulance.
+function upsertAmbulanceMarker(ambulanceId, lat, lng, status, meta) {
+  if (meta) ambulanceMeta.set(ambulanceId, meta);
   const color = staleAmbulanceIds.has(ambulanceId) ? AMBULANCE_COLORS.stale : (AMBULANCE_COLORS[status] || AMBULANCE_COLORS.available);
+  const tooltipText = ambulanceTooltipText(ambulanceId, status);
   let marker = ambulanceMarkers.get(ambulanceId);
   if (!marker) {
     marker = L.circleMarker([lat, lng], {
@@ -137,11 +170,12 @@ function upsertAmbulanceMarker(ambulanceId, lat, lng, status) {
       fillOpacity: 0.9,
       weight: 2,
     }).addTo(map);
-    marker.bindTooltip(`Ambulance #${ambulanceId}`);
+    marker.bindTooltip(tooltipText);
     ambulanceMarkers.set(ambulanceId, marker);
   } else {
     marker.setLatLng([lat, lng]);
     marker.setStyle({ color, fillColor: color });
+    marker.setTooltipContent(tooltipText);
   }
 }
 
@@ -149,7 +183,10 @@ async function loadAmbulances() {
   const { ambulances } = await apiGet('/api/ambulances');
   for (const amb of ambulances) {
     if (amb.lat !== null && amb.lng !== null) {
-      upsertAmbulanceMarker(amb.id, amb.lat, amb.lng, amb.status);
+      upsertAmbulanceMarker(amb.id, amb.lat, amb.lng, amb.status, {
+        callSign: amb.call_sign,
+        capabilityLevel: amb.capability_level,
+      });
     }
   }
 }

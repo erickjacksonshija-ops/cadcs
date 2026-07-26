@@ -77,6 +77,9 @@ function attachSocketHandlers(io) {
           lat: updated.lat,
           lng: updated.lng,
           lastPingAt: updated.last_ping_at,
+          status: updated.status,
+          callSign: updated.call_sign,
+          capabilityLevel: updated.capability_level,
         });
       } catch (err) {
         console.error('Error handling ambulance:location:', err);
