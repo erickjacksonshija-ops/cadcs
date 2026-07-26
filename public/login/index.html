@@ -15,7 +15,9 @@
       display: flex;
       flex-direction: column;
       justify-content: center;
-      padding: 4rem 4.5rem;
+      align-items: center;
+      text-align: center;
+      padding: 3.5rem 4.5rem;
       background:
         radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.16), transparent 45%),
         radial-gradient(circle at 80% 75%, rgba(239, 68, 68, 0.12), transparent 40%),
@@ -31,7 +33,7 @@
       background-size: 28px 28px;
       mask-image: radial-gradient(circle at 30% 40%, black, transparent 75%);
     }
-    .hero-content { position: relative; max-width: 460px; }
+    .hero-content { position: relative; max-width: 480px; margin: 0 auto; }
     .hero-eyebrow {
       display: inline-block;
       font-size: 0.75rem;
@@ -40,20 +42,65 @@
       color: var(--color-accent);
       border: 1px solid rgba(56, 189, 248, 0.35);
       background: rgba(56, 189, 248, 0.08);
-      padding: 0.25rem 0.6rem;
+      padding: 0.3rem 0.7rem;
       border-radius: 999px;
-      margin-bottom: 1.25rem;
+      margin-bottom: 1.5rem;
     }
-    .hero h1 { font-size: 2.4rem; line-height: 1.15; margin: 0 0 0.9rem; letter-spacing: -0.01em; }
-    .hero p.lede { color: var(--color-text-dim); font-size: 1.05rem; line-height: 1.6; margin: 0 0 2.25rem; }
-    .hero-features { display: flex; flex-direction: column; gap: 1rem; }
-    .hero-feature { display: flex; align-items: flex-start; gap: 0.75rem; }
-    .hero-feature .dot {
-      flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%;
-      background: var(--color-accent); margin-top: 0.45rem;
+    .hero h1 {
+      font-size: 3.4rem;
+      font-weight: 800;
+      line-height: 1;
+      margin: 0 0 0.6rem;
+      letter-spacing: -0.02em;
     }
-    .hero-feature .text { font-size: 0.92rem; color: #cbd5e1; line-height: 1.5; }
-    .hero-feature .text strong { color: var(--color-text); }
+    .hero .tagline {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      margin: 0 0 1rem;
+      letter-spacing: -0.005em;
+    }
+    .hero p.lede {
+      color: var(--color-text-dim);
+      font-size: 0.98rem;
+      line-height: 1.6;
+      margin: 0 auto 2rem;
+      max-width: 42ch;
+    }
+
+    .ambulance-illustration {
+      display: block;
+      width: 100%;
+      max-width: 380px;
+      height: auto;
+      margin: 0 auto 2.25rem;
+      filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.35));
+    }
+
+    .hero-features {
+      display: flex;
+      flex-direction: column;
+      gap: 1.1rem;
+      padding-top: 1.75rem;
+      margin-top: 0.25rem;
+      border-top: 1px solid rgba(148, 163, 184, 0.16);
+      text-align: left;
+    }
+    .hero-feature { display: flex; align-items: flex-start; gap: 0.85rem; }
+    .hero-feature .icon-badge {
+      flex-shrink: 0;
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .hero-feature .icon-badge svg { width: 16px; height: 16px; }
+    .hero-feature .text { font-size: 0.92rem; color: #cbd5e1; line-height: 1.55; padding-top: 0.2rem; }
+    .hero-feature .text strong { color: var(--color-text); font-weight: 600; }
 
     .form-side {
       flex: 1;
@@ -72,9 +119,11 @@
 
     @media (max-width: 860px) {
       body { flex-direction: column; }
-      .hero { flex: none; padding: 2.5rem 1.75rem; }
-      .hero h1 { font-size: 1.6rem; }
-      .hero p.lede { font-size: 0.95rem; margin-bottom: 1.5rem; }
+      .hero { flex: none; padding: 2.25rem 1.75rem; }
+      .hero h1 { font-size: 1.8rem; }
+      .hero .tagline { font-size: 0.95rem; }
+      .hero p.lede { font-size: 0.9rem; margin-bottom: 1.5rem; }
+      .ambulance-illustration { max-width: 240px; margin-bottom: 1.5rem; }
       .hero-features { display: none; }
       .form-side { flex: none; min-width: 0; padding: 2rem 1.5rem 3rem; }
     }
@@ -85,18 +134,55 @@
     <div class="hero-content">
       <span class="hero-eyebrow">Mbeya Region &middot; Emergency Medical Services</span>
       <h1>CADCS</h1>
-      <p class="lede">Centralized Ambulance Dispatch &amp; Command System &mdash; coordinating every registered ambulance provider, hospital, and dispatcher on one live platform.</p>
+      <p class="tagline">Centralized Ambulance Dispatch &amp; Command System</p>
+
+      <svg class="ambulance-illustration" viewBox="0 0 400 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Illustration of an ambulance">
+        <ellipse cx="205" cy="168" rx="175" ry="9" fill="#000000" opacity="0.28" />
+
+        <!-- cargo box -->
+        <rect x="40" y="55" width="225" height="90" rx="10" fill="#1e293b" stroke="#38bdf8" stroke-width="2.5" />
+        <!-- cab -->
+        <path d="M265 145 L265 88 Q265 76 277 76 L322 76 Q335 76 343 87 L365 122 L365 145 Z" fill="#1e293b" stroke="#38bdf8" stroke-width="2.5" stroke-linejoin="round" />
+        <!-- windshield -->
+        <path d="M277 86 L320 86 Q328 86 334 95 L347 118 L281 118 Z" fill="#38bdf8" opacity="0.4" />
+
+        <!-- red cross emblem -->
+        <g fill="#ef4444">
+          <rect x="128" y="80" width="42" height="15" rx="2.5" />
+          <rect x="142" y="66" width="15" height="43" rx="2.5" />
+        </g>
+        <!-- side stripe -->
+        <rect x="40" y="116" width="225" height="9" fill="#ef4444" opacity="0.75" />
+        <!-- roof light bar -->
+        <rect x="276" y="64" width="42" height="11" rx="3.5" fill="#ef4444" />
+        <rect x="276" y="64" width="21" height="11" rx="3.5" fill="#38bdf8" />
+
+        <!-- wheels -->
+        <circle cx="102" cy="150" r="23" fill="#0b1220" stroke="#64748b" stroke-width="3.5" />
+        <circle cx="102" cy="150" r="8" fill="#64748b" />
+        <circle cx="315" cy="150" r="23" fill="#0b1220" stroke="#64748b" stroke-width="3.5" />
+        <circle cx="315" cy="150" r="8" fill="#64748b" />
+      </svg>
+
+      <p class="lede">Coordinating every registered ambulance provider, hospital, and dispatcher on one live platform &mdash; with real road-network dispatch, not straight-line guesses.</p>
+
       <div class="hero-features">
         <div class="hero-feature">
-          <span class="dot"></span>
+          <span class="icon-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+          </span>
           <span class="text"><strong>Real road-network dispatch.</strong> Nearest-ambulance ranking runs on actual street routing, not straight-line guesses.</span>
         </div>
         <div class="hero-feature">
-          <span class="dot"></span>
+          <span class="icon-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/></svg>
+          </span>
           <span class="text"><strong>Cross-provider visibility.</strong> Every registered ambulance, regardless of owner, is coordinated from a single live map.</span>
         </div>
         <div class="hero-feature">
-          <span class="dot"></span>
+          <span class="icon-badge">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.2-9.5-9.6C.6 7.8 3 4 7 4c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 4 0 6.4 3.8 4.5 7.4C19 15.8 12 21 12 21z"/></svg>
+          </span>
           <span class="text"><strong>Hospital pre-notification.</strong> Receiving facilities see incoming patients and real ETAs before the ambulance arrives.</span>
         </div>
       </div>
