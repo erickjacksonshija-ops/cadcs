@@ -3,6 +3,7 @@ const pool = require('../../src/config/db');
 
 const TABLES = [
   'sessions',
+  'push_subscriptions',
   'hospital_notifications',
   'ambulance_location_pings',
   'incident_events',

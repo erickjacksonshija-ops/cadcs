@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.cadcs.crew",
+      "sha256_cert_fingerprints": [
+        "10:4C:2A:99:B1:64:12:D7:22:0B:58:59:1A:CD:B3:4A:B0:2F:E5:F5:27:46:B2:B8:67:F8:2E:59:F0:03:49:63"
+      ]
+    }
+  }
+]

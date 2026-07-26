@@ -59,6 +59,7 @@ async function api(method, path, body) {
 
 const apiGet = (path) => api('GET', path);
 const apiPost = (path, body) => api('POST', path, body);
+const apiPatch = (path, body) => api('PATCH', path, body);
 
 // Every frontend renders via innerHTML template literals for simplicity
 // (no framework, matching the project's stack decision) -- which means

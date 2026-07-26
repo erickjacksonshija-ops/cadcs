@@ -4,6 +4,8 @@ const { ROLES } = require('../config/roles');
 const ambulanceService = require('../services/ambulanceService');
 const notificationService = require('../services/notificationService');
 const auditService = require('../services/auditService');
+const pushService = require('../services/pushService');
+const userService = require('../services/userService');
 const env = require('../config/env');
 const { setIo } = require('./ioRegistry');
 
@@ -138,6 +140,19 @@ function attachSocketHandlers(io) {
           incidentId: notification.incident_id,
           hospitalId: notification.hospital_id,
         });
+
+        // Web Push alongside the Socket.IO emit above -- reaches a
+        // dispatcher even if the dashboard tab isn't focused, which is
+        // exactly the scenario this escalation exists to catch (see plan:
+        // "Notification Reliability").
+        userService
+          .findActiveIdsByRoles([ROLES.DISPATCHER, ROLES.ADMIN])
+          .then((userIds) => pushService.sendToUsers(userIds, {
+            title: 'Hospital acknowledgment overdue',
+            body: `Incident #${notification.incident_id} -- notification unacknowledged past the escalation threshold`,
+            url: '/dispatcher/',
+          }))
+          .catch((err) => console.error('Push notification failed:', err.message));
       }
     } catch (err) {
       console.error('Error during hospital-ack escalation sweep:', err);

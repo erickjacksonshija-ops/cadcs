@@ -4,6 +4,7 @@ const pool = require('../config/db');
 const incidentService = require('../services/incidentService');
 const triageService = require('../services/triageService');
 const dispatchService = require('../services/dispatchService');
+const auditService = require('../services/auditService');
 const routingService = require('../services/routingService');
 const ambulanceService = require('../services/ambulanceService');
 const { serializeIncidentForRole } = require('../services/incidentSerializer');
@@ -107,6 +108,26 @@ router.get('/:id', requireRole(ROLES.DISPATCHER, ROLES.ADMIN), async (req, res, 
     next(err);
   }
 });
+
+// The full non-repudiation audit trail for this incident (proposal Sec 5) --
+// every dispatch decision, status change, and notification event, in
+// order. Dispatcher/admin only, same as the incident record itself; this
+// is an operational/audit view, not something crew or hospital roles need.
+router.get(
+  '/:id/events',
+  requireRole(ROLES.DISPATCHER, ROLES.ADMIN),
+  param('id').isInt(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const incident = await incidentService.findById(req.params.id);
+      if (!incident) return res.status(404).json({ error: 'Incident not found' });
+      res.json({ events: await auditService.getTimeline(req.params.id) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 // Ranked ambulance candidates for this incident (real road-network ETA via
 // OSRM, or a flagged Haversine fallback if OSRM is unreachable). Read-only

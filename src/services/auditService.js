@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const auditWriterPool = require('../config/auditDb');
 
 const EVENT_TYPES = [
   'created', 'triage_suggested', 'priority_overridden', 'candidates_ranked',
@@ -7,11 +8,22 @@ const EVENT_TYPES = [
   'cancelled', 'closed',
 ];
 
-// Append-only by convention: this module must be the ONLY place in the
-// codebase that writes to incident_events, and it must only ever INSERT
-// (see 006_create_incident_events.sql and docs/audit-log-integrity.md for
-// the full non-repudiation rationale, plus the Sprint 6 hardening item to
-// enforce this with a DB-level INSERT-only grant, not just convention).
+// Append-only, enforced two ways:
+//  - This module must be the ONLY place in the codebase that writes to
+//    incident_events, and it must only ever INSERT.
+//  - When no transaction connection is supplied, the write runs through
+//    auditWriterPool, a separate connection pool authenticated as a DB
+//    user with only INSERT, SELECT granted on this table (see
+//    docs/audit-log-integrity.md and scripts/harden-audit-log-grants.sh) --
+//    UPDATE/DELETE from this path fail at the database level, not just by
+//    convention.
+//  - Call sites that pass `connection` (dispatchService's atomic
+//    assignment/status-change transactions, where the audit entry must
+//    commit atomically with the state change it records) use the main
+//    pool's connection instead, since a transaction can't span two
+//    separate connections. Those still rely on the single-writer,
+//    INSERT-only convention above -- a real, documented limitation, not
+//    an oversight.
 //
 // occurred_at is deliberately never passed in -- it always comes from the
 // column's own DEFAULT CURRENT_TIMESTAMP(3), so the timestamp is always
@@ -20,7 +32,7 @@ async function logEvent(incidentId, eventType, { actorUserId = null, metadata = 
   if (!EVENT_TYPES.includes(eventType)) {
     throw new Error(`Invalid incident event type: ${eventType}`);
   }
-  const runner = connection || pool;
+  const runner = connection || auditWriterPool;
   await runner.query(
     `INSERT INTO incident_events (incident_id, event_type, actor_user_id, metadata)
      VALUES (:incidentId, :eventType, :actorUserId, :metadata)`,

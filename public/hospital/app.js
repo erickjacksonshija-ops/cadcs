@@ -26,7 +26,38 @@ async function init() {
     window.location.href = '/';
   });
 
+  await initNotificationsButton();
   await loadNotifications();
+}
+
+// Web Push opt-in (see plan: "Notification Reliability") -- reaches this
+// hospital account's staff even when the portal tab is backgrounded, on
+// top of the Socket.IO push above which only works while it's focused.
+const PUSH_SW_PATH = '/hospital/service-worker.js';
+
+async function initNotificationsButton() {
+  const btn = document.getElementById('notifications-btn');
+  const enabled = await isPushEnabled(PUSH_SW_PATH);
+  btn.textContent = enabled ? 'Notifications on' : 'Enable notifications';
+  btn.disabled = enabled;
+
+  const statusEl = document.getElementById('notifications-status');
+  const STATUS_MESSAGES = {
+    denied: 'Permission denied -- allow notifications in your browser settings.',
+    unsupported: 'Not supported in this browser.',
+    unavailable: 'Not configured on this server yet.',
+  };
+
+  btn.addEventListener('click', async () => {
+    statusEl.textContent = '';
+    const result = await enablePushNotifications(PUSH_SW_PATH);
+    if (result === 'enabled') {
+      btn.textContent = 'Notifications on';
+      btn.disabled = true;
+    } else {
+      statusEl.textContent = STATUS_MESSAGES[result] || '';
+    }
+  });
 }
 
 function initSocket() {

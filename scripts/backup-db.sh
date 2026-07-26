@@ -27,18 +27,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$PROJECT_ROOT/.env"
 
-if [ ! -f "$ENV_FILE" ]; then
-  echo "Error: $ENV_FILE not found -- cannot read DB credentials." >&2
+if [ ! -f "$ENV_FILE" ] && [ -z "${DB_HOST:-}" ]; then
+  echo "Error: $ENV_FILE not found, and no DB_* environment variables set -- cannot read DB credentials." >&2
   exit 1
 fi
 
 # Only pull the specific vars this script needs, rather than sourcing the
 # whole .env file (which may contain values not safe to eval as shell).
-DB_HOST=$(grep -E '^DB_HOST=' "$ENV_FILE" | cut -d '=' -f2-)
-DB_PORT=$(grep -E '^DB_PORT=' "$ENV_FILE" | cut -d '=' -f2-)
-DB_USER=$(grep -E '^DB_USER=' "$ENV_FILE" | cut -d '=' -f2-)
-DB_PASSWORD=$(grep -E '^DB_PASSWORD=' "$ENV_FILE" | cut -d '=' -f2-)
-DB_NAME=$(grep -E '^DB_NAME=' "$ENV_FILE" | cut -d '=' -f2-)
+# Pre-set environment variables win over .env -- needed when this runs as
+# its own Docker Compose service, where the real DB host on the container
+# network ("mysql") differs from whatever DB_HOST a host-side .env has for
+# native `npm run dev`.
+DB_HOST="${DB_HOST:-$(grep -E '^DB_HOST=' "$ENV_FILE" | cut -d '=' -f2-)}"
+DB_PORT="${DB_PORT:-$(grep -E '^DB_PORT=' "$ENV_FILE" | cut -d '=' -f2-)}"
+DB_USER="${DB_USER:-$(grep -E '^DB_USER=' "$ENV_FILE" | cut -d '=' -f2-)}"
+DB_PASSWORD="${DB_PASSWORD:-$(grep -E '^DB_PASSWORD=' "$ENV_FILE" | cut -d '=' -f2-)}"
+DB_NAME="${DB_NAME:-$(grep -E '^DB_NAME=' "$ENV_FILE" | cut -d '=' -f2-)}"
 
 BACKUP_DIR="${BACKUP_DIR:-$PROJECT_ROOT/backups}"
 RETENTION_COUNT="${RETENTION_COUNT:-28}" # ~7 days at 4 backups/day

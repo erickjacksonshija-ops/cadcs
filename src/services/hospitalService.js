@@ -48,4 +48,35 @@ async function listWithDistanceFrom(lat, lng, { activeOnly = true } = {}) {
   return rows;
 }
 
-module.exports = { createHospital, findById, list, listWithDistanceFrom };
+// Editable fields only -- excludes `active`, handled separately by
+// setActive (a hospital going inactive means it drops out of the crew's
+// destination picker and dispatch's hospital-selection candidates).
+async function updateHospital(id, { name, lat, lng, address, contactPhone }) {
+  const existing = await findById(id);
+  if (!existing) return null;
+  await pool.query(
+    `UPDATE hospitals SET name = :name, location = ${POINT_SQL}, address = :address, contact_phone = :contactPhone
+     WHERE id = :id`,
+    {
+      id,
+      name: name ?? existing.name,
+      lat: lat ?? existing.lat,
+      lng: lng ?? existing.lng,
+      address: address !== undefined ? address || null : existing.address,
+      contactPhone: contactPhone !== undefined ? contactPhone || null : existing.contact_phone,
+    }
+  );
+  return findById(id);
+}
+
+// Soft delete/restore -- hospitals are referenced by past incidents'
+// assigned_hospital_id, so hard DELETE isn't viable; deactivating removes
+// it from live selection without touching history.
+async function setActive(id, active) {
+  const existing = await findById(id);
+  if (!existing) return null;
+  await pool.query('UPDATE hospitals SET active = :active WHERE id = :id', { id, active: active ? 1 : 0 });
+  return findById(id);
+}
+
+module.exports = { createHospital, findById, list, listWithDistanceFrom, updateHospital, setActive };

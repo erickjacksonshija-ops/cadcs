@@ -92,6 +92,20 @@ label {
 
 .muted { color: var(--color-text-dim); font-size: 0.85rem; }
 
+.timeline {
+  margin-top: 0.5rem;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.timeline-entry {
+  border-left: 2px solid var(--color-border);
+  padding: 0.25rem 0 0.5rem 0.75rem;
+  margin-left: 0.25rem;
+}
+.timeline-time { font-size: 0.75rem; }
+.timeline-label { font-weight: 600; font-size: 0.9rem; }
+.timeline-meta { font-size: 0.8rem; }
+
 .topbar {
   display: flex;
   justify-content: space-between;

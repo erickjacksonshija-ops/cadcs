@@ -26,6 +26,18 @@ function percentile(values, p) {
   return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
 }
 
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Monday-anchored ISO-ish week start, formatted as the date itself so bars
+// sort and label chronologically without pulling in a date library.
+function weekStartKey(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diffToMonday);
+  return d.toISOString().slice(0, 10);
+}
+
 function eventTimeMs(events, predicate) {
   const found = events.find(predicate);
   return found ? new Date(found.occurred_at).getTime() : null;
@@ -71,6 +83,8 @@ async function computeIncidentTimings() {
       providerId: incident.provider_id,
       reportedAt: incident.reported_at,
       hourOfDay: new Date(incident.reported_at).getHours(),
+      dayOfWeek: DAY_NAMES[new Date(incident.reported_at).getDay()],
+      weekStart: weekStartKey(new Date(incident.reported_at)),
       callToDispatchSeconds: assignedAt && createdAt ? (assignedAt - createdAt) / 1000 : null,
       dispatchToSceneSeconds: onSceneAt && assignedAt ? (onSceneAt - assignedAt) / 1000 : null,
       sceneToHospitalSeconds: atHospitalAt && onSceneAt ? (atHospitalAt - onSceneAt) / 1000 : null,
@@ -100,10 +114,26 @@ async function getSummary() {
   const volumeByPriority = {};
   const volumeByHour = {};
   const volumeByProvider = {};
+  const volumeByDayOfWeekRaw = {};
+  const volumeByWeekRaw = {};
   for (const t of timings) {
     volumeByPriority[t.priority] = (volumeByPriority[t.priority] || 0) + 1;
     volumeByHour[t.hourOfDay] = (volumeByHour[t.hourOfDay] || 0) + 1;
     if (t.providerId) volumeByProvider[t.providerId] = (volumeByProvider[t.providerId] || 0) + 1;
+    volumeByDayOfWeekRaw[t.dayOfWeek] = (volumeByDayOfWeekRaw[t.dayOfWeek] || 0) + 1;
+    volumeByWeekRaw[t.weekStart] = (volumeByWeekRaw[t.weekStart] || 0) + 1;
+  }
+
+  // Insertion order controls display order for object-keyed bar charts on
+  // the frontend, so these are rebuilt in a deliberate order rather than
+  // however the incidents happened to be iterated above.
+  const volumeByDayOfWeek = {};
+  for (const day of DAY_NAMES.slice(1).concat(DAY_NAMES[0])) {
+    if (volumeByDayOfWeekRaw[day]) volumeByDayOfWeek[day] = volumeByDayOfWeekRaw[day];
+  }
+  const volumeByWeek = {};
+  for (const week of Object.keys(volumeByWeekRaw).sort()) {
+    volumeByWeek[week] = volumeByWeekRaw[week];
   }
 
   const [providers] = await pool.query('SELECT id, name FROM providers');
@@ -129,6 +159,8 @@ async function getSummary() {
     sceneToHospital: summarizeDurations(timings.map((t) => t.sceneToHospitalSeconds)),
     volumeByPriority,
     volumeByHour,
+    volumeByDayOfWeek,
+    volumeByWeek,
     volumeByProvider: Object.fromEntries(
       Object.entries(volumeByProvider).map(([id, count]) => [providerNames[id] || `#${id}`, count])
     ),

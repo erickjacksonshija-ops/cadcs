@@ -60,6 +60,38 @@ async function init() {
     await apiPost('/api/auth/logout');
     window.location.href = '/';
   });
+
+  await initNotificationsButton();
+}
+
+// Web Push opt-in (see plan: "Notification Reliability") -- reaches a
+// dispatcher even when the dashboard tab is backgrounded, for hospital-ack
+// escalation alerts specifically (see sockets/index.js's escalation sweep).
+const PUSH_SW_PATH = '/dispatcher/service-worker.js';
+
+async function initNotificationsButton() {
+  const btn = document.getElementById('notifications-btn');
+  const statusEl = document.getElementById('notifications-status');
+  const enabled = await isPushEnabled(PUSH_SW_PATH);
+  btn.textContent = enabled ? 'Notifications on' : 'Enable notifications';
+  btn.disabled = enabled;
+
+  const STATUS_MESSAGES = {
+    denied: 'Permission denied -- allow notifications in your browser settings.',
+    unsupported: 'Not supported in this browser.',
+    unavailable: 'Not configured on this server yet.',
+  };
+
+  btn.addEventListener('click', async () => {
+    statusEl.textContent = '';
+    const result = await enablePushNotifications(PUSH_SW_PATH);
+    if (result === 'enabled') {
+      btn.textContent = 'Notifications on';
+      btn.disabled = true;
+    } else {
+      statusEl.textContent = STATUS_MESSAGES[result] || '';
+    }
+  });
 }
 
 function initMap() {
@@ -308,13 +340,59 @@ function setPendingPin(lat, lng) {
   renderContextPanel();
 }
 
+// Address/landmark search, secondary to click-to-pin (see plan: "Incident
+// Intake & Location Capture") -- click-to-pin always works with zero
+// external dependency, this just saves a dispatcher from having to
+// eyeball a location on the map when the caller gave a nameable landmark.
+async function runLocationSearch() {
+  const input = document.getElementById('location-search-input');
+  const resultsBox = document.getElementById('location-search-results');
+  const q = input.value.trim();
+  if (q.length < 2) return;
+
+  resultsBox.innerHTML = '<p class="muted">Searching...</p>';
+  try {
+    const { results, unavailable } = await apiGet(`/api/geocode/search?q=${encodeURIComponent(q)}`);
+    if (unavailable) {
+      resultsBox.innerHTML = '<p class="muted">Address search is unavailable right now -- click the map instead.</p>';
+      return;
+    }
+    if (results.length === 0) {
+      resultsBox.innerHTML = '<p class="muted">No matches -- try a different search, or click the map instead.</p>';
+      return;
+    }
+    resultsBox.innerHTML = results.map((r, i) => `
+      <div class="search-result" data-index="${i}">${escapeHtml(r.displayName)}</div>
+    `).join('');
+    resultsBox.querySelectorAll('.search-result').forEach((el) => {
+      el.addEventListener('click', () => {
+        const r = results[Number(el.dataset.index)];
+        map.setView([r.lat, r.lng], 16);
+        setPendingPin(r.lat, r.lng);
+      });
+    });
+  } catch (err) {
+    resultsBox.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+  }
+}
+
 function renderNewIncidentForm(panel) {
   if (!pendingPin) {
     panel.innerHTML = `
-      <p class="pin-hint">Click on the map to set the incident location.</p>
+      <label for="location-search-input">Search address or landmark</label>
+      <div class="field-row">
+        <input id="location-search-input" placeholder="e.g. Mbeya Zonal Referral Hospital" />
+        <button class="secondary" id="location-search-btn" style="flex:0;">Search</button>
+      </div>
+      <div id="location-search-results"></div>
+      <p class="pin-hint">...or click on the map to set the incident location.</p>
       <button class="secondary" id="cancel-new">Cancel</button>
     `;
     document.getElementById('cancel-new').addEventListener('click', cancelNewIncident);
+    document.getElementById('location-search-btn').addEventListener('click', runLocationSearch);
+    document.getElementById('location-search-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); runLocationSearch(); }
+    });
     return;
   }
 
@@ -433,6 +511,8 @@ function renderIncidentDetail(panel, incident) {
     <p class="muted">Status: ${incident.status}</p>
 
     ${candidatesSection}
+    <button class="secondary" id="view-timeline-btn" style="width:100%; margin-top:0.75rem;">View audit timeline</button>
+    <div id="timeline-container"></div>
     ${cancelSection}
   `;
 
@@ -441,6 +521,71 @@ function renderIncidentDetail(panel, incident) {
 
   const cancelBtn = document.getElementById('cancel-incident-btn');
   if (cancelBtn) cancelBtn.addEventListener('click', () => promptCancelIncident(incident.id));
+
+  document.getElementById('view-timeline-btn').addEventListener('click', () => loadTimeline(incident.id));
+}
+
+// The append-only incident_events record (see auditService/
+// docs/audit-log-integrity.md), rendered as a chronological timeline --
+// this is the concrete evidence behind the proposal's non-repudiation
+// audit-trail claim (Sec 5), not just raw rows sitting unused in a table.
+const EVENT_LABELS = {
+  created: 'Incident created',
+  triage_suggested: 'Triage suggested',
+  priority_overridden: 'Priority overridden',
+  candidates_ranked: 'Candidates ranked',
+  assigned: 'Ambulance assigned',
+  assignment_rejected_conflict: 'Assignment rejected (conflict)',
+  dispatched: 'Dispatched',
+  status_changed: 'Status changed',
+  hospital_notified: 'Hospital notified',
+  hospital_ack_escalated: 'Hospital ack escalated',
+  hospital_acknowledged: 'Hospital acknowledged',
+  cancelled: 'Cancelled',
+  closed: 'Closed',
+};
+
+function formatEventMetadata(eventType, metadata) {
+  if (!metadata) return '';
+  if (eventType === 'status_changed' && metadata.from && metadata.to) {
+    return `${metadata.from} &rarr; ${metadata.to}`;
+  }
+  if (eventType === 'assigned' && metadata.ambulanceId) {
+    return `Ambulance #${metadata.ambulanceId}`;
+  }
+  if (eventType === 'cancelled' && metadata.reason) {
+    return escapeHtml(metadata.reason);
+  }
+  if (eventType === 'candidates_ranked') {
+    const count = Array.isArray(metadata.candidates) ? metadata.candidates.length : 0;
+    return `${count} candidate(s), routing: ${escapeHtml(metadata.routingSource || 'unknown')}`;
+  }
+  return '';
+}
+
+async function loadTimeline(incidentId) {
+  const container = document.getElementById('timeline-container');
+  container.innerHTML = '<p class="muted">Loading timeline...</p>';
+  try {
+    const { events } = await apiGet(`/api/incidents/${incidentId}/events`);
+    if (events.length === 0) {
+      container.innerHTML = '<p class="muted">No events recorded yet.</p>';
+      return;
+    }
+    container.innerHTML = `
+      <div class="timeline">
+        ${events.map((e) => `
+          <div class="timeline-entry">
+            <div class="timeline-time muted">${new Date(e.occurred_at).toLocaleString()}</div>
+            <div class="timeline-label">${escapeHtml(EVENT_LABELS[e.event_type] || e.event_type)}</div>
+            <div class="timeline-meta muted">${formatEventMetadata(e.event_type, typeof e.metadata === 'string' ? JSON.parse(e.metadata) : e.metadata)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+  }
 }
 
 function promptCancelIncident(incidentId) {

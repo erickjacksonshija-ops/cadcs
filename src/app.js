@@ -11,6 +11,8 @@ const incidentRoutes = require('./routes/incidents');
 const ambulanceRoutes = require('./routes/ambulances');
 const hospitalRoutes = require('./routes/hospitals');
 const hospitalNotificationRoutes = require('./routes/hospitalNotifications');
+const geocodeRoutes = require('./routes/geocode');
+const pushRoutes = require('./routes/push');
 
 function createApp() {
   const app = express();
@@ -74,7 +76,13 @@ function createApp() {
   app.use('/api/ambulances', ambulanceRoutes);
   app.use('/api/hospitals', hospitalRoutes);
   app.use('/api/hospital/notifications', hospitalNotificationRoutes);
+  app.use('/api/geocode', geocodeRoutes);
+  app.use('/api/push', pushRoutes);
 
+  // dotfiles: 'allow' is required here -- express.static ignores dot-segment
+  // paths by default, which would silently 404 the Android TWA asset-link
+  // verification file.
+  app.use('/.well-known', express.static(path.join(__dirname, '../public/.well-known'), { dotfiles: 'allow' }));
   app.use('/shared', express.static(path.join(__dirname, '../public/shared')));
   app.use('/', express.static(path.join(__dirname, '../public/login')));
   app.use('/dispatcher', express.static(path.join(__dirname, '../public/dispatcher')));

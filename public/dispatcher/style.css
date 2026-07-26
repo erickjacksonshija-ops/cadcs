@@ -61,3 +61,15 @@ body { display: flex; flex-direction: column; }
   border-radius: var(--radius);
   font-size: 0.85rem;
 }
+
+.search-result {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.search-result:hover {
+  border-color: var(--color-accent);
+}

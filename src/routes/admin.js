@@ -86,6 +86,41 @@ router.get('/users', requireRole(ROLES.ADMIN), async (_req, res, next) => {
   }
 });
 
+router.patch(
+  '/users/:id',
+  requireRole(ROLES.ADMIN),
+  param('id').isInt(),
+  body('name').optional().isString().trim().notEmpty(),
+  body('phone').optional().isString(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const user = await userService.updateUser(req.params.id, req.body);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      res.json({ user: userService.toPublicUser(user) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.patch(
+  '/users/:id/active',
+  requireRole(ROLES.ADMIN),
+  param('id').isInt(),
+  body('active').isBoolean(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const user = await userService.setActive(req.params.id, req.body.active);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      res.json({ user: userService.toPublicUser(user) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // Admin-mediated password reset (see userService.setPassword for why this
 // exists instead of a self-service "forgot password" email flow).
 router.post(
@@ -136,6 +171,44 @@ router.get('/providers', requireRole(ROLES.ADMIN), async (_req, res, next) => {
   }
 });
 
+router.patch(
+  '/providers/:id',
+  requireRole(ROLES.ADMIN),
+  param('id').isInt(),
+  body('name').optional().isString().trim().notEmpty(),
+  body('type').optional().isIn(['hospital_owned', 'private', 'ngo']),
+  body('contactPhone').optional().isString(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const provider = await providerService.updateProvider(req.params.id, req.body);
+      if (!provider) return res.status(404).json({ error: 'Provider not found' });
+      res.json({ provider });
+    } catch (err) {
+      const mapped = mapDbError(err);
+      if (mapped) return res.status(mapped.status).json({ error: mapped.message });
+      next(err);
+    }
+  }
+);
+
+router.patch(
+  '/providers/:id/active',
+  requireRole(ROLES.ADMIN),
+  param('id').isInt(),
+  body('active').isBoolean(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const provider = await providerService.setActive(req.params.id, req.body.active);
+      if (!provider) return res.status(404).json({ error: 'Provider not found' });
+      res.json({ provider });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // --- Hospitals ---------------------------------------------------------
 
 router.post(
@@ -167,6 +240,46 @@ router.get('/hospitals', requireRole(ROLES.ADMIN), async (_req, res, next) => {
   }
 });
 
+router.patch(
+  '/hospitals/:id',
+  requireRole(ROLES.ADMIN),
+  param('id').isInt(),
+  body('name').optional().isString().trim().notEmpty(),
+  body('lat').optional().isFloat({ min: -90, max: 90 }),
+  body('lng').optional().isFloat({ min: -180, max: 180 }),
+  body('address').optional().isString(),
+  body('contactPhone').optional().isString(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const hospital = await hospitalService.updateHospital(req.params.id, req.body);
+      if (!hospital) return res.status(404).json({ error: 'Hospital not found' });
+      res.json({ hospital });
+    } catch (err) {
+      const mapped = mapDbError(err);
+      if (mapped) return res.status(mapped.status).json({ error: mapped.message });
+      next(err);
+    }
+  }
+);
+
+router.patch(
+  '/hospitals/:id/active',
+  requireRole(ROLES.ADMIN),
+  param('id').isInt(),
+  body('active').isBoolean(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const hospital = await hospitalService.setActive(req.params.id, req.body.active);
+      if (!hospital) return res.status(404).json({ error: 'Hospital not found' });
+      res.json({ hospital });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // --- Ambulances ----------------------------------------------------------
 
 router.post(
@@ -196,6 +309,44 @@ router.get('/ambulances', requireRole(ROLES.ADMIN), async (req, res, next) => {
     next(err);
   }
 });
+
+router.patch(
+  '/ambulances/:id',
+  requireRole(ROLES.ADMIN),
+  param('id').isInt(),
+  body('providerId').optional().isInt(),
+  body('callSign').optional().isString().trim().notEmpty(),
+  body('capabilityLevel').optional().isIn(['BLS', 'ALS']),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const ambulance = await ambulanceService.updateAmbulance(req.params.id, req.body);
+      if (!ambulance) return res.status(404).json({ error: 'Ambulance not found' });
+      res.json({ ambulance });
+    } catch (err) {
+      const mapped = mapDbError(err);
+      if (mapped) return res.status(mapped.status).json({ error: mapped.message });
+      next(err);
+    }
+  }
+);
+
+router.patch(
+  '/ambulances/:id/active',
+  requireRole(ROLES.ADMIN),
+  param('id').isInt(),
+  body('active').isBoolean(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const ambulance = await ambulanceService.setActive(req.params.id, req.body.active);
+      if (!ambulance) return res.status(404).json({ error: 'Ambulance not found' });
+      res.json({ ambulance });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 // Response-time analytics, computed from real incident_events timestamps
 // -- the evidence behind Objective v's benchmark evaluation.

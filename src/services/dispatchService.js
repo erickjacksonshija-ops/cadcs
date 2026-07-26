@@ -6,6 +6,8 @@ const incidentService = require('./incidentService');
 const ambulanceService = require('./ambulanceService');
 const hospitalService = require('./hospitalService');
 const notificationService = require('./notificationService');
+const pushService = require('./pushService');
+const userService = require('./userService');
 const { tryGetIo } = require('../sockets/ioRegistry');
 const { DISPATCHERS_ROOM, crewRoom, hospitalRoom } = require('../sockets/rooms');
 const { serializeIncidentForRole } = require('./incidentSerializer');
@@ -371,6 +373,22 @@ async function updateMissionStatus(incidentId, crewUserId, targetStatus, hospita
           incident: serializeIncidentForRole(updatedIncident, ROLES.HOSPITAL_STAFF),
         });
       }
+    }
+
+    // Web Push alongside the Socket.IO emit above (not instead of it) --
+    // reaches hospital staff whose portal tab is backgrounded or closed
+    // (see plan: "Notification Reliability"). Fire-and-forget: a push
+    // failure must never undo or block the pre-notification that already
+    // committed.
+    if (notificationResult) {
+      userService
+        .findActiveIdsByHospital(hospitalId)
+        .then((userIds) => pushService.sendToUsers(userIds, {
+          title: 'Incoming patient',
+          body: `Incident #${incidentId} -- ETA ${notificationResult.etaSeconds ? Math.round(notificationResult.etaSeconds / 60) + ' min' : 'unknown'}`,
+          url: '/hospital/',
+        }))
+        .catch((err) => console.error('Push notification failed:', err.message));
     }
 
     return updatedIncident;

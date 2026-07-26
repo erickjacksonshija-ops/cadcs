@@ -12,6 +12,8 @@
     <h1>CADCS Hospital Portal</h1>
     <div>
       <span id="user-name" class="muted"></span>
+      <button class="secondary" id="notifications-btn" style="margin-left: 0.75rem;">Enable notifications</button>
+      <span id="notifications-status" class="muted"></span>
       <button class="secondary" id="logout-btn" style="margin-left: 0.75rem;">Sign out</button>
     </div>
   </div>
@@ -22,6 +24,7 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/shared/api.js"></script>
+  <script src="/shared/push.js"></script>
   <script src="/hospital/app.js"></script>
 </body>
 </html>

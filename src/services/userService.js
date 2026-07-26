@@ -106,12 +106,61 @@ async function setPassword(userId, newPassword) {
   return findById(userId);
 }
 
+// Name/phone only -- deliberately excludes email, role, providerId, and
+// hospitalId. Role/link changes affect the RBAC and role-aware
+// serialization model deeply enough (see requiredLinkFor / the CHECK
+// constraint above) that they warrant deactivating and re-provisioning a
+// new account rather than a same-record mutation.
+async function updateUser(id, { name, phone }) {
+  const existing = await findById(id);
+  if (!existing) return null;
+  await pool.query('UPDATE users SET name = :name, phone = :phone WHERE id = :id', {
+    id,
+    name: name ?? existing.name,
+    phone: phone !== undefined ? phone || null : existing.phone,
+  });
+  return findById(id);
+}
+
+// The real access-control lever: verifyCredentials already refuses to
+// authenticate an inactive user, so this is how an admin actually revokes
+// someone's access (e.g. a crew member leaving a provider) without a hard
+// DELETE that would orphan their audit-trail actor_user_id references.
+async function setActive(id, active) {
+  const existing = await findById(id);
+  if (!existing) return null;
+  await pool.query('UPDATE users SET active = :active WHERE id = :id', { id, active: active ? 1 : 0 });
+  return findById(id);
+}
+
+// Recipient lookups for pushService -- "who should get a hospital
+// pre-notification / dispatcher escalation alert" (see plan: "Notification
+// Reliability"). Active users only: a deactivated account shouldn't keep
+// receiving OS-level push notifications just because a stale subscription
+// row is still sitting in the DB.
+async function findActiveIdsByHospital(hospitalId) {
+  const [rows] = await pool.query(
+    "SELECT id FROM users WHERE hospital_id = :hospitalId AND role = 'hospital_staff' AND active = 1",
+    { hospitalId }
+  );
+  return rows.map((r) => r.id);
+}
+
+async function findActiveIdsByRoles(roles) {
+  const [rows] = await pool.query('SELECT id FROM users WHERE role IN (:roles) AND active = 1', { roles });
+  return rows.map((r) => r.id);
+}
+
 module.exports = {
   createUser,
   findByEmail,
   findById,
   verifyCredentials,
   setPassword,
+  updateUser,
+  setActive,
+  findActiveIdsByHospital,
+  findActiveIdsByRoles,
   toPublicUser,
   ValidationError,
   ConflictError,

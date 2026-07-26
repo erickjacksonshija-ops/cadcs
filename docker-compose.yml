@@ -66,11 +66,55 @@ services:
     volumes:
       - ./osrm-data:/data
 
-  # Nominatim (self-hosted geocoding) -- same OSM extract as OSRM, wired up
-  # in Sprint 2 for address search as a convenience alongside click-to-pin.
-  # nominatim:
-  #   image: mediagis/nominatim:4.4
-  #   ports:
-  #     - "8080:8080"
-  #   volumes:
-  #     - ./nominatim-data:/var/lib/postgresql/14/main
+  # Scheduled DB backup (see plan: "Data Durability"). Runs scripts/backup-db.sh
+  # on a loop rather than needing cron installed on the host -- the mysql:8.0
+  # image already ships the matching mysqldump client. DB_* here are passed
+  # directly rather than via .env because the real host on this network is
+  # "mysql", not whatever a host-side .env has for native `npm run dev`.
+  backup:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      BACKUP_DIR: /backups
+      BACKUP_INTERVAL_SECONDS: 21600 # every 6 hours
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./scripts/backup-db.sh:/backup-db.sh:ro
+      - ./backups:/backups
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        set -e
+        while true; do
+          bash /backup-db.sh
+          sleep "$$BACKUP_INTERVAL_SECONDS"
+        done
+
+  # Nominatim (self-hosted geocoding) -- same regional OSM extract as OSRM
+  # (osrm-data/mbeya-latest.osm.pbf), backing the dispatcher's address/
+  # landmark search (src/services/geocodeService.js). First boot imports
+  # the extract into Postgres and takes several minutes (verified: ~15 on
+  # this machine, most of it Postgres checkpoint I/O on a bind-mounted
+  # volume, not the actual osm2pgsql import which finishes in under a
+  # minute for a region this size) -- subsequent starts reuse
+  # ./nominatim-data and come up in seconds. geocodeService.js already
+  # degrades to an empty result set (dispatcher falls back to click-to-pin)
+  # if this service is down or still importing, so it's never a hard
+  # dependency for the app to start.
+  nominatim:
+    image: mediagis/nominatim:4.4
+    restart: unless-stopped
+    environment:
+      PBF_PATH: /nominatim/data.osm.pbf
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./osrm-data/mbeya-latest.osm.pbf:/nominatim/data.osm.pbf
+      - ./nominatim-data:/var/lib/postgresql/14/main

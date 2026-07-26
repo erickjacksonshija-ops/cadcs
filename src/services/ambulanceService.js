@@ -67,4 +67,42 @@ async function recordLocationPing(ambulanceId, lat, lng) {
   );
 }
 
-module.exports = { createAmbulance, findById, list, updateLocation, recordLocationPing };
+// Identity/capability fields only -- deliberately does not touch `status`,
+// which is dispatchService's domain (crew-initiated transitions, atomic
+// compare-and-swap assignment) and must never be overwritten by an
+// unrelated admin edit mid-mission.
+async function updateAmbulance(id, { providerId, callSign, capabilityLevel }) {
+  const existing = await findById(id);
+  if (!existing) return null;
+  await pool.query(
+    `UPDATE ambulances SET provider_id = :providerId, call_sign = :callSign, capability_level = :capabilityLevel
+     WHERE id = :id`,
+    {
+      id,
+      providerId: providerId ?? existing.provider_id,
+      callSign: callSign ?? existing.call_sign,
+      capabilityLevel: capabilityLevel ?? existing.capability_level,
+    }
+  );
+  return findById(id);
+}
+
+// Soft delete/restore (retiring a unit from the fleet) -- distinct from
+// `status`, which tracks live operational state. An inactive ambulance is
+// excluded from dispatch candidate lists regardless of what `status` says.
+async function setActive(id, active) {
+  const existing = await findById(id);
+  if (!existing) return null;
+  await pool.query('UPDATE ambulances SET active = :active WHERE id = :id', { id, active: active ? 1 : 0 });
+  return findById(id);
+}
+
+module.exports = {
+  createAmbulance,
+  findById,
+  list,
+  updateLocation,
+  recordLocationPing,
+  updateAmbulance,
+  setActive,
+};
