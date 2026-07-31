@@ -789,10 +789,16 @@ async function submitPriorityChange(incidentId) {
   const reason = document.getElementById('priority-reason').value.trim();
   errorBox.innerHTML = '';
   try {
-    const { incident } = await apiPost(`/api/incidents/${incidentId}/priority`, { priority, reason });
+    const { incident, capabilityWarning } = await apiPost(`/api/incidents/${incidentId}/priority`, { priority, reason });
     incidents.set(incident.id, incident);
     renderIncidentsList();
     renderContextPanel();
+    // renderContextPanel() just rebuilt #detail-error fresh -- populate it
+    // after, not before, or this gets wiped by that rebuild.
+    if (capabilityWarning) {
+      const detailError = document.getElementById('detail-error');
+      if (detailError) detailError.innerHTML = `<div class="warning-banner">${escapeHtml(capabilityWarning)}</div>`;
+    }
   } catch (err) {
     errorBox.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
   }

@@ -407,13 +407,13 @@ router.post(
   async (req, res, next) => {
     if (!handleValidation(req, res)) return;
     try {
-      const incident = await dispatchService.escalatePriority(
+      const { incident, capabilityWarning } = await dispatchService.escalatePriority(
         req.params.id,
         req.session.user.id,
         req.body.priority,
         req.body.reason
       );
-      res.json({ incident });
+      res.json({ incident, capabilityWarning });
     } catch (err) {
       if (err instanceof dispatchService.ValidationError) {
         return res.status(err.status).json({ error: err.message });

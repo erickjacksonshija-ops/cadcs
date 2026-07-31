@@ -24,6 +24,26 @@ describe('auth + admin provisioning (integration)', () => {
     await pool.end();
   });
 
+  // Backs the dispatcher board's live SLA-aging alert (see plan: "Live
+  // SLA-aging alert") -- the frontend needs the real configured benchmark,
+  // not a hardcoded duplicate of it, to know when an unassigned incident is
+  // approaching the WHO response-time benchmark.
+  it('includes the response-time benchmark in /me so the dispatcher board can flag aging incidents live', async () => {
+    await userService.createUser({
+      name: 'Admin One',
+      email: 'admin@test.local',
+      password: 'correct-password-1',
+      role: ROLES.ADMIN,
+    });
+
+    const agent = request.agent(app);
+    await loginAs(agent, 'admin@test.local', 'correct-password-1');
+
+    const res = await agent.get('/api/auth/me');
+    expect(res.status).toBe(200);
+    expect(res.body.config.responseTimeBenchmarkSeconds).toBe(480);
+  });
+
   it('rejects login with wrong credentials, allows login with right ones, and enforces auth on /me', async () => {
     await userService.createUser({
       name: 'Admin One',

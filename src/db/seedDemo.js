@@ -137,16 +137,27 @@ async function run() {
   const redCrossMbeya = await findOrCreateProvider('Red Cross Mbeya', 'ngo');
 
   // --- Hospitals -------------------------------------------------------
-  // Only one entry here, deliberately: Mbeya Zonal Referral Hospital is a
-  // real, verified institution -- name, address, and these exact
-  // coordinates come from the hospital's own published directory listing
-  // (Sisimba Street, Uzunguni, Mbeya), not an estimate. Earlier drafts of
-  // this seed script included three additional "hospitals" with
+  // Mbeya Zonal Referral Hospital's name, address, and coordinates come
+  // from the hospital's own published directory listing (Sisimba Street,
+  // Uzunguni, Mbeya) -- the highest-confidence source used here. Earlier
+  // drafts of this seed script included three additional "hospitals" with
   // approximated coordinates and, in one case, a made-up name -- removed
   // entirely rather than kept as labeled placeholders, per an explicit
   // instruction not to mix approximated data into what's presented as
-  // real. Add more here only when each one is independently verified the
-  // same way.
+  // real.
+  //
+  // The three below are a step down in confidence from that (crowd-sourced
+  // OpenStreetMap node data -- the same live source this project's own
+  // OSRM/Nominatim geocoding already relies on -- rather than an official
+  // directory), but are real, named, addressed, geographically distinct
+  // facilities, not estimates: Meta Hospital (Simike St., Mabatini Ward),
+  // K's Quality Hospital (Forest St.), and Igawilo Hospital. Verified via
+  // Overpass API query against OSM for amenity=hospital within the Mbeya
+  // OSRM coverage area; entries that were clearly the same facility as the
+  // Zonal Referral Hospital under an old/alternate OSM name tag (e.g.
+  // "Mbeya Referral Hospital", "Hospitali Ya Mkoa Mbeya" -- both within
+  // ~150m of the Zonal Referral's directory-listed coordinates) were
+  // deliberately excluded rather than added as if distinct.
   const hospitals = {
     zonal: await findOrCreateHospital(
       'Mbeya Zonal Referral Hospital',
@@ -154,6 +165,9 @@ async function run() {
       33.4455639,
       'Sisimba Street, Uzunguni, Mbeya'
     ),
+    meta: await findOrCreateHospital('Meta Hospital', -8.9101236, 33.4324216, 'Simike Street, Mabatini Ward, Mbeya'),
+    ksQuality: await findOrCreateHospital("K's Quality Hospital", -8.9094097, 33.4535542, 'Forest Street, Mbeya'),
+    igawilo: await findOrCreateHospital('Igawilo Hospital', -8.9234996, 33.5696526, 'Igawilo, Mbeya'),
   };
 
   // --- Dispatchers -----------------------------------------------------
@@ -209,6 +223,27 @@ async function run() {
     email: 'baraka.hospital@cadcs.local',
     role: ROLES.HOSPITAL_STAFF,
     hospitalId: hospitals.zonal.id,
+  });
+  // One staff login per newly-added hospital, so diversion status (see
+  // plan: "Hospital diversion/capacity status") can actually be demoed
+  // across more than one facility, not just the Zonal Referral Hospital.
+  await findOrCreateUser({
+    name: 'Nurse Happiness Mwaikambo',
+    email: 'happiness.hospital@cadcs.local',
+    role: ROLES.HOSPITAL_STAFF,
+    hospitalId: hospitals.meta.id,
+  });
+  await findOrCreateUser({
+    name: 'Dr. Godfrey Mwakalinda',
+    email: 'godfrey.hospital@cadcs.local',
+    role: ROLES.HOSPITAL_STAFF,
+    hospitalId: hospitals.ksQuality.id,
+  });
+  await findOrCreateUser({
+    name: 'Nurse Consolata Ndunguru',
+    email: 'consolata.hospital@cadcs.local',
+    role: ROLES.HOSPITAL_STAFF,
+    hospitalId: hospitals.igawilo.id,
   });
 
   // --- Sample incidents, driven through the real dispatch lifecycle -----
@@ -300,7 +335,10 @@ async function run() {
   console.log('Demo accounts (all use password: ' + DEMO_PASSWORD + '):');
   console.log('  Dispatcher:      grace.dispatcher@cadcs.local');
   console.log('  Crew (MB-01):    sam.crew@cadcs.local');
-  console.log('  Hospital staff:  amina.hospital@cadcs.local');
+  console.log('  Hospital staff:  amina.hospital@cadcs.local (Mbeya Zonal Referral Hospital)');
+  console.log('                   happiness.hospital@cadcs.local (Meta Hospital)');
+  console.log('                   godfrey.hospital@cadcs.local (K\'s Quality Hospital)');
+  console.log('                   consolata.hospital@cadcs.local (Igawilo Hospital)');
 }
 
 if (require.main === module) {

@@ -507,10 +507,28 @@ async function escalatePriority(incidentId, dispatcherUserId, newPriority, reaso
   });
 
   const updatedIncident = await incidentService.findById(incidentId);
+
+  // Priority and required_capability are independent fields (a dispatcher
+  // can legitimately create a P1/BLS incident at intake) -- so this never
+  // blocks the escalation. But P1 escalating an already-assigned incident
+  // past what the currently assigned unit can handle is exactly the kind
+  // of thing that's easy to miss mid-call, so it's surfaced as an
+  // advisory warning rather than silently left for the dispatcher to
+  // notice on their own.
+  let capabilityWarning = null;
+  if (newPriority === 'P1' && updatedIncident.assigned_ambulance_id) {
+    const assignedAmbulance = await ambulanceService.findById(updatedIncident.assigned_ambulance_id);
+    if (assignedAmbulance && assignedAmbulance.capability_level !== 'ALS') {
+      capabilityWarning =
+        `Assigned ambulance ${assignedAmbulance.call_sign} is ${assignedAmbulance.capability_level} -- ` +
+        'consider reassigning an ALS-capable unit for a P1 incident.';
+    }
+  }
+
   const io = tryGetIo();
   if (io) io.to(DISPATCHERS_ROOM).emit('incident:priority_changed', updatedIncident);
 
-  return updatedIncident;
+  return { incident: updatedIncident, capabilityWarning };
 }
 
 module.exports = {

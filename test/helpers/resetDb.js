@@ -6,6 +6,7 @@ const TABLES = [
   'push_subscriptions',
   'hospital_notifications',
   'ambulance_location_pings',
+  'mission_messages',
   'incident_events',
   'incidents',
   'ambulances',
