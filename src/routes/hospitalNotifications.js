@@ -17,6 +17,19 @@ router.get('/', requireRole(ROLES.HOSPITAL_STAFF), async (req, res, next) => {
   }
 });
 
+router.get('/:id/eta', requireRole(ROLES.HOSPITAL_STAFF), param('id').isInt(), async (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ error: 'Invalid input', details: errors.array() });
+
+  try {
+    const result = await notificationService.getLiveEta(req.params.id, req.session.user.hospitalId);
+    if (!result) return res.status(404).json({ error: 'Notification not found' });
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post(
   '/:id/acknowledge',
   requireRole(ROLES.HOSPITAL_STAFF),

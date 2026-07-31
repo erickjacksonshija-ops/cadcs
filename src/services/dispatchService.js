@@ -8,6 +8,7 @@ const hospitalService = require('./hospitalService');
 const notificationService = require('./notificationService');
 const pushService = require('./pushService');
 const userService = require('./userService');
+const triageService = require('./triageService');
 const { tryGetIo } = require('../sockets/ioRegistry');
 const { DISPATCHERS_ROOM, crewRoom, hospitalRoom } = require('../sockets/rooms');
 const { serializeIncidentForRole } = require('./incidentSerializer');
@@ -157,15 +158,15 @@ async function rankHospitals(incidentId) {
       origin,
       hospitals.map((h) => ({ lat: h.lat, lng: h.lng }))
     );
-    ranked = hospitals
-      .map((h, i) => ({
-        hospitalId: h.id,
-        name: h.name,
-        address: h.address,
-        etaSeconds: routed[i].durationSeconds,
-        distanceMeters: routed[i].distanceMeters,
-      }))
-      .sort((a, b) => a.etaSeconds - b.etaSeconds);
+    ranked = hospitals.map((h, i) => ({
+      hospitalId: h.id,
+      name: h.name,
+      address: h.address,
+      etaSeconds: routed[i].durationSeconds,
+      distanceMeters: routed[i].distanceMeters,
+      diversionStatus: h.diversion_status,
+      diversionReason: h.diversion_reason,
+    }));
   } catch (err) {
     if (!(err instanceof routingService.OsrmUnavailableError)) throw err;
     routingSource = 'haversine_fallback';
@@ -176,8 +177,23 @@ async function rankHospitals(incidentId) {
       address: h.address,
       etaSeconds: null,
       distanceMeters: h.haversine_meters,
+      diversionStatus: h.diversion_status,
+      diversionReason: h.diversion_reason,
     }));
   }
+
+  // Diversion is advisory, not a hard filter -- a crew can still transport
+  // to a diverting hospital if it's genuinely the closest viable option
+  // (standard EMS override practice). So accepting hospitals are simply
+  // surfaced first; diverting ones stay in the list, sorted among
+  // themselves, rather than disappearing.
+  const rankKey = (h) => (h.etaSeconds ?? h.distanceMeters);
+  ranked.sort((a, b) => {
+    if (a.diversionStatus !== b.diversionStatus) {
+      return a.diversionStatus === 'diversion' ? 1 : -1;
+    }
+    return rankKey(a) - rankKey(b);
+  });
 
   return { hospitals: ranked, routingSource };
 }
@@ -291,7 +307,7 @@ async function updateMissionStatus(incidentId, crewUserId, targetStatus, hospita
     }
 
     const [[ambulance]] = await conn.query(
-      `SELECT id, status, current_crew_user_id, ${latLngColumns('current_location')}
+      `SELECT id, status, current_crew_user_id, call_sign, capability_level, ${latLngColumns('current_location')}
        FROM ambulances WHERE id = :id FOR UPDATE`,
       { id: incident.assigned_ambulance_id }
     );
@@ -370,6 +386,8 @@ async function updateMissionStatus(incidentId, crewUserId, targetStatus, hospita
         io.to(hospitalRoom(hospitalId)).emit('hospital:notified', {
           notificationId: notificationResult.notificationId,
           etaSeconds: notificationResult.etaSeconds,
+          ambulanceCallSign: ambulance.call_sign,
+          ambulanceCapabilityLevel: ambulance.capability_level,
           incident: serializeIncidentForRole(updatedIncident, ROLES.HOSPITAL_STAFF),
         });
       }
@@ -459,12 +477,49 @@ async function cancelIncident(incidentId, dispatcherUserId, reason) {
   }
 }
 
+// Real CAD systems let a dispatcher re-triage mid-call as new information
+// comes in (e.g. "the caller says the patient just stopped responding") --
+// initial triage (triageService.classify) only ever runs once, at
+// creation. This is the one place priority can change after that, and it's
+// always logged with a reason so the audit trail shows exactly why an
+// incident's urgency changed mid-response, not just that it did.
+async function escalatePriority(incidentId, dispatcherUserId, newPriority, reason) {
+  if (!triageService.PRIORITIES.includes(newPriority)) {
+    throw new ValidationError(`Invalid priority: ${newPriority}`);
+  }
+
+  const incident = await incidentService.findById(incidentId);
+  if (!incident) throw new ValidationError('Incident not found');
+  if (['closed', 'cancelled'].includes(incident.status)) {
+    throw new ValidationError(`Cannot change priority on a ${incident.status} incident`);
+  }
+  if (newPriority === incident.priority) {
+    throw new ValidationError('Incident already has this priority');
+  }
+
+  await pool.query('UPDATE incidents SET priority = :newPriority WHERE id = :incidentId', {
+    newPriority,
+    incidentId,
+  });
+  await auditService.logEvent(incidentId, 'priority_changed', {
+    actorUserId: dispatcherUserId,
+    metadata: { from: incident.priority, to: newPriority, reason },
+  });
+
+  const updatedIncident = await incidentService.findById(incidentId);
+  const io = tryGetIo();
+  if (io) io.to(DISPATCHERS_ROOM).emit('incident:priority_changed', updatedIncident);
+
+  return updatedIncident;
+}
+
 module.exports = {
   rankCandidates,
   rankHospitals,
   assignAmbulance,
   updateMissionStatus,
   cancelIncident,
+  escalatePriority,
   ConflictError,
   ValidationError,
   PRE_FILTER_LIMIT,

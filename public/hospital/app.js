@@ -27,7 +27,94 @@ async function init() {
   });
 
   await initNotificationsButton();
+  await renderDiversionBar();
   await loadNotifications();
+  startEtaPolling();
+}
+
+// Self-reported capacity status (see plan: "Hospital diversion/capacity
+// status") -- advisory, not a hard block: dispatchService.rankHospitals
+// still lists this facility when it's on diversion, just sorted after
+// accepting ones, so a crew can still override for a genuinely critical
+// patient. This bar is the hospital side of that -- staff flip it when the
+// ED is too full to safely take new patients.
+async function renderDiversionBar() {
+  const bar = document.getElementById('diversion-bar');
+  if (!bar) return;
+  let hospital;
+  try {
+    ({ hospital } = await apiGet('/api/hospitals/mine'));
+  } catch (err) {
+    bar.innerHTML = errorBannerHtml(err.message);
+    return;
+  }
+
+  const isDiversion = hospital.diversion_status === 'diversion';
+  bar.innerHTML = `
+    <div class="panel diversion-bar ${isDiversion ? 'diversion' : 'accepting'}">
+      <div>
+        <strong>${hospital.name}</strong> is currently
+        <strong>${isDiversion ? 'ON DIVERSION' : 'ACCEPTING'}</strong> patients.
+        ${isDiversion && hospital.diversion_reason ? `<span class="muted"> &mdash; ${escapeHtml(hospital.diversion_reason)}</span>` : ''}
+      </div>
+      <div class="diversion-controls">
+        ${isDiversion
+          ? '<button id="set-accepting-btn">Mark accepting again</button>'
+          : `<input id="diversion-reason-input" placeholder="Reason (optional)" />
+             <button class="danger" id="set-diversion-btn">Go on diversion</button>`}
+      </div>
+    </div>
+  `;
+
+  const acceptBtn = document.getElementById('set-accepting-btn');
+  if (acceptBtn) acceptBtn.addEventListener('click', () => setDiversionStatus('accepting'));
+
+  const diversionBtn = document.getElementById('set-diversion-btn');
+  if (diversionBtn) {
+    diversionBtn.addEventListener('click', () => {
+      const reason = document.getElementById('diversion-reason-input').value.trim();
+      setDiversionStatus('diversion', reason);
+    });
+  }
+}
+
+function errorBannerHtml(message) {
+  return `<div class="error-banner">${escapeHtml(message)}</div>`;
+}
+
+async function setDiversionStatus(status, reason) {
+  try {
+    await apiPost('/api/hospitals/mine/diversion-status', { status, reason: reason || undefined });
+    await renderDiversionBar();
+  } catch (err) {
+    const bar = document.getElementById('diversion-bar');
+    if (bar) bar.innerHTML += errorBannerHtml(err.message);
+  }
+}
+
+// Recomputes each pending notification's ETA from the ambulance's current
+// GPS position every 20s (see GET /api/hospital/notifications/:id/eta) --
+// eta_snapshot_seconds is a one-time value taken when transport started, so
+// without this the pill would sit frozen for the whole trip. Acknowledged
+// notifications stop polling; the hospital has already acted on them.
+const ETA_POLL_INTERVAL_MS = 20000;
+
+function startEtaPolling() {
+  setInterval(refreshLiveEtas, ETA_POLL_INTERVAL_MS);
+}
+
+async function refreshLiveEtas() {
+  const pending = [...notifications.values()].filter((n) => !n.acknowledged_at);
+  if (pending.length === 0) return;
+  await Promise.all(pending.map(async (n) => {
+    try {
+      const { etaSeconds } = await apiGet(`/api/hospital/notifications/${n.id}/eta`);
+      n.live_eta_seconds = etaSeconds;
+    } catch {
+      // leave whatever ETA was last known rather than blanking the pill
+    }
+  }));
+  render();
 }
 
 // Web Push opt-in (see plan: "Notification Reliability") -- reaches this
@@ -77,6 +164,8 @@ function initSocket() {
       location_description: payload.incident.location_description,
       patient_notes: payload.incident.patient_notes,
       status: payload.incident.status,
+      ambulance_call_sign: payload.ambulanceCallSign,
+      ambulance_capability_level: payload.ambulanceCapabilityLevel,
     });
     render();
     flashNewAlert();
@@ -126,11 +215,21 @@ function render() {
   container.innerHTML = sorted.map((n) => {
     const stateClass = n.acknowledged_at ? 'acknowledged' : n.escalated_at ? 'escalated' : 'pending';
     const priorityBadge = n.priority === 'P1' ? 'badge-p1' : n.priority === 'P2' ? 'badge-p2' : 'badge-p3';
+    const unitLabel = n.ambulance_call_sign
+      ? `${escapeHtml(n.ambulance_call_sign)}${n.ambulance_capability_level ? ` &middot; ${escapeHtml(n.ambulance_capability_level)}` : ''}`
+      : 'Unit inbound';
+    // Trip-status-card layout (ambulance identity + live ETA up top, same
+    // "who's coming and when" framing a ride-hailing trip card leads with)
+    // rather than burying it below the clinical detail.
     return `
       <div class="panel notification-card ${stateClass}">
         <div class="top-row">
           <span class="badge ${priorityBadge}">${n.priority}</span>
-          <span class="eta-pill">${etaLabel(n.eta_snapshot_seconds)}</span>
+          <span class="eta-pill">${etaLabel(n.live_eta_seconds !== undefined ? n.live_eta_seconds : n.eta_snapshot_seconds)}</span>
+        </div>
+        <div class="unit-row">
+          <span class="unit-icon" aria-hidden="true">&#128657;</span>
+          <span class="unit-label">${unitLabel}</span>
         </div>
         <h3 style="margin: 0.4rem 0;">${escapeHtml(n.chief_complaint)} <span class="muted">(${escapeHtml(n.required_capability)})</span></h3>
         <p class="muted">${escapeHtml(n.location_description) || ''}</p>

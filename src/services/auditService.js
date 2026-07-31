@@ -5,7 +5,7 @@ const EVENT_TYPES = [
   'created', 'triage_suggested', 'priority_overridden', 'candidates_ranked',
   'assigned', 'assignment_rejected_conflict', 'dispatched', 'status_changed',
   'hospital_notified', 'hospital_ack_escalated', 'hospital_acknowledged',
-  'cancelled', 'closed',
+  'cancelled', 'closed', 'sos_triggered', 'priority_changed',
 ];
 
 // Append-only, enforced two ways:

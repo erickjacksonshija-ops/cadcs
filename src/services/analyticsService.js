@@ -1,5 +1,6 @@
 const pool = require('../config/db');
 const env = require('../config/env');
+const { latLngColumns } = require('./geo');
 
 // Response-time breakdowns are computed from incident_events timestamps
 // (all server-generated, see auditService) rather than trusted client
@@ -172,4 +173,116 @@ async function getSummary() {
   };
 }
 
-module.exports = { getSummary, computeIncidentTimings };
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+const COVERAGE_CELL_DEGREES = 0.03; // ~3km grid cells at this latitude
+// Straight-line proxy, not the real OSRM road distance dispatchService uses
+// for live dispatch ranking -- this view exists to answer a strategic
+// question ("where might we want more coverage?"), not to rank an actual
+// dispatch decision, so a cheap approximation is the right tool here.
+const COVERAGE_GAP_KM_THRESHOLD = 5;
+
+// Bins historical incident demand into a grid and pairs each occupied cell
+// with its distance to the nearest currently-available ambulance, so an
+// admin can see not just "where have calls come from" but "where are calls
+// coming from that we're not currently well-positioned to reach quickly" --
+// evidence-based fleet positioning (proposal Sec 1.4 "resource planning"),
+// not just after-the-fact response-time reporting.
+async function getCoverageGrid() {
+  const [incidents] = await pool.query(`SELECT ${latLngColumns('location')} FROM incidents`);
+  const [availableAmbulances] = await pool.query(
+    `SELECT ${latLngColumns('current_location')} FROM ambulances
+     WHERE status = 'available' AND active = 1 AND current_location IS NOT NULL`
+  );
+
+  const cells = new Map(); // "latIdx:lngIdx" -> { latIdx, lngIdx, incidentCount }
+  for (const inc of incidents) {
+    const latIdx = Math.floor(inc.lat / COVERAGE_CELL_DEGREES);
+    const lngIdx = Math.floor(inc.lng / COVERAGE_CELL_DEGREES);
+    const key = `${latIdx}:${lngIdx}`;
+    const existing = cells.get(key);
+    if (existing) {
+      existing.incidentCount += 1;
+    } else {
+      cells.set(key, { latIdx, lngIdx, incidentCount: 1 });
+    }
+  }
+
+  const gridCells = [...cells.values()]
+    .map(({ latIdx, lngIdx, incidentCount }) => {
+      const lat = (latIdx + 0.5) * COVERAGE_CELL_DEGREES;
+      const lng = (lngIdx + 0.5) * COVERAGE_CELL_DEGREES;
+      const nearestAvailableKm = availableAmbulances.length === 0
+        ? null
+        : Math.min(...availableAmbulances.map((a) => haversineKm(lat, lng, a.lat, a.lng)));
+      return {
+        lat,
+        lng,
+        incidentCount,
+        nearestAvailableKm: nearestAvailableKm === null ? null : Math.round(nearestAvailableKm * 10) / 10,
+        isGap: nearestAvailableKm === null || nearestAvailableKm > COVERAGE_GAP_KM_THRESHOLD,
+      };
+    })
+    .sort((a, b) => b.incidentCount - a.incidentCount);
+
+  return { cells: gridCells, gapKmThreshold: COVERAGE_GAP_KM_THRESHOLD, availableAmbulanceCount: availableAmbulances.length };
+}
+
+const REPOSITIONING_MAX_SUGGESTIONS = 3;
+
+// Extends the coverage-gap view from passive reporting into an active
+// recommendation -- System Status Management, the dynamic-posting practice
+// real US EMS providers (AMR, MedStar) use to reposition idle units toward
+// predicted demand rather than waiting at a fixed station. Greedy nearest-
+// idle-unit match against the highest-incident-count gap cells; each
+// ambulance is only ever suggested once, so two gaps never both claim the
+// same idle unit.
+async function getRepositioningSuggestions() {
+  const { cells } = await getCoverageGrid();
+  const gapCells = cells.filter((c) => c.isGap).slice(0, REPOSITIONING_MAX_SUGGESTIONS);
+  if (gapCells.length === 0) return { suggestions: [] };
+
+  const [availableAmbulances] = await pool.query(
+    `SELECT id, call_sign, ${latLngColumns('current_location')} FROM ambulances
+     WHERE status = 'available' AND active = 1 AND current_location IS NOT NULL`
+  );
+
+  const used = new Set();
+  const suggestions = [];
+  for (const gap of gapCells) {
+    let nearest = null;
+    let nearestKm = Infinity;
+    for (const amb of availableAmbulances) {
+      if (used.has(amb.id)) continue;
+      const km = haversineKm(gap.lat, gap.lng, amb.lat, amb.lng);
+      if (km < nearestKm) {
+        nearestKm = km;
+        nearest = amb;
+      }
+    }
+    if (!nearest) break; // no more idle ambulances left to suggest
+    used.add(nearest.id);
+    suggestions.push({
+      ambulanceId: nearest.id,
+      callSign: nearest.call_sign,
+      fromLat: nearest.lat,
+      fromLng: nearest.lng,
+      toLat: gap.lat,
+      toLng: gap.lng,
+      gapIncidentCount: gap.incidentCount,
+      distanceKm: Math.round(nearestKm * 10) / 10,
+    });
+  }
+
+  return { suggestions };
+}
+
+module.exports = { getSummary, computeIncidentTimings, getCoverageGrid, getRepositioningSuggestions };

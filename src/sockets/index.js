@@ -3,6 +3,8 @@ const { DISPATCHERS_ROOM, crewRoom, hospitalRoom, findCurrentAmbulanceForCrew } 
 const { ROLES } = require('../config/roles');
 const ambulanceService = require('../services/ambulanceService');
 const notificationService = require('../services/notificationService');
+const incidentService = require('../services/incidentService');
+const missionMessageService = require('../services/missionMessageService');
 const auditService = require('../services/auditService');
 const pushService = require('../services/pushService');
 const userService = require('../services/userService');
@@ -85,6 +87,86 @@ function attachSocketHandlers(io) {
         });
       } catch (err) {
         console.error('Error handling ambulance:location:', err);
+      }
+    });
+
+    // Crew<->dispatcher coordination channel, scoped to whichever mission
+    // (incident) the target ambulance is currently on -- see plan item
+    // "crew<->dispatcher chat channel". Persisted via missionMessageService
+    // so the history survives reconnects, then relayed to both sides of the
+    // conversation. A crew socket can only ever message on behalf of its
+    // own assigned ambulance (never client-supplied); a dispatcher/admin
+    // socket names the target ambulance explicitly.
+    socket.on('mission:message', async (payload = {}) => {
+      try {
+        const body = typeof payload.body === 'string' ? payload.body.trim() : '';
+        if (!body || body.length > 500) return;
+
+        let ambulanceId;
+        if (user.role === ROLES.CREW) {
+          ambulanceId = socket.data.ambulanceId;
+        } else if (user.role === ROLES.DISPATCHER || user.role === ROLES.ADMIN) {
+          ambulanceId = Number(payload.ambulanceId);
+        } else {
+          return;
+        }
+        if (!ambulanceId) return;
+
+        const incident = await incidentService.findActiveByAmbulanceId(ambulanceId);
+        if (!incident) return; // no active mission on this ambulance to attach the message to
+
+        const message = await missionMessageService.sendMessage({
+          incidentId: incident.id,
+          ambulanceId,
+          senderUserId: user.id,
+          senderRole: user.role === ROLES.ADMIN ? 'admin' : user.role,
+          senderName: user.name,
+          body,
+        });
+
+        io.to(DISPATCHERS_ROOM).to(crewRoom(ambulanceId)).emit('mission:message', message);
+      } catch (err) {
+        console.error('Error handling mission:message:', err);
+      }
+    });
+
+    // Crew safety/panic button -- a one-way alert to dispatch, distinct
+    // from ordinary status updates. Records to the incident's own
+    // non-repudiation audit trail (an SOS is itself a safety-critical
+    // event) and pushes to dispatchers even if the dashboard tab is
+    // backgrounded, same reasoning as the hospital-ack escalation sweep.
+    socket.on('mission:sos', async () => {
+      if (user.role !== ROLES.CREW || !socket.data.ambulanceId) return;
+      const ambulanceId = socket.data.ambulanceId;
+
+      try {
+        const incident = await incidentService.findActiveByAmbulanceId(ambulanceId);
+        if (!incident) return; // no active mission to attach the alert to
+
+        await auditService.logEvent(incident.id, 'sos_triggered', {
+          actorUserId: user.id,
+          metadata: { ambulanceId },
+        });
+
+        const ambulance = await ambulanceService.findById(ambulanceId);
+        io.to(DISPATCHERS_ROOM).emit('mission:sos', {
+          incidentId: incident.id,
+          ambulanceId,
+          callSign: ambulance?.call_sign || null,
+          triggeredBy: user.name,
+          triggeredAt: new Date().toISOString(),
+        });
+
+        userService
+          .findActiveIdsByRoles([ROLES.DISPATCHER, ROLES.ADMIN])
+          .then((userIds) => pushService.sendToUsers(userIds, {
+            title: 'SOS -- crew needs assistance',
+            body: `${ambulance?.call_sign || `Ambulance #${ambulanceId}`} triggered SOS on incident #${incident.id}`,
+            url: '/dispatcher/',
+          }))
+          .catch((err) => console.error('Push notification failed:', err.message));
+      } catch (err) {
+        console.error('Error handling mission:sos:', err);
       }
     });
   });

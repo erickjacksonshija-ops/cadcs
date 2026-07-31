@@ -181,11 +181,12 @@ async function renderHospitals() {
       </div>
       <div class="panel">
         <table>
-          <thead><tr><th>ID</th><th>Name</th><th>Location</th><th>Address</th><th>Active</th><th></th></tr></thead>
+          <thead><tr><th>ID</th><th>Name</th><th>Location</th><th>Address</th><th>Active</th><th>Capacity</th><th></th></tr></thead>
           <tbody>
             ${hospitals.map((h) => `
               <tr>
                 <td>${h.id}</td><td>${escapeHtml(h.name)}</td><td>${h.lat.toFixed(4)}, ${h.lng.toFixed(4)}</td><td>${escapeHtml(h.address) || ''}</td><td>${h.active ? 'Yes' : 'No'}</td>
+                <td>${h.diversion_status === 'diversion' ? '<span style="color:var(--color-danger);font-weight:600;">Diversion</span>' : 'Accepting'}</td>
                 <td style="display:flex; gap:0.4rem;">
                   <button class="secondary edit-hospital-btn" data-id="${h.id}">Edit</button>
                   <button class="secondary toggle-active-btn" data-id="${h.id}" data-active="${h.active ? '1' : '0'}">${h.active ? 'Deactivate' : 'Activate'}</button>
@@ -618,7 +619,123 @@ async function renderAnalytics() {
     ${renderBarBreakdown('Incident volume by day of week', summary.volumeByDayOfWeek)}
     ${renderBarBreakdown('Incident volume by week', summary.volumeByWeek)}
     ${renderBarBreakdown('Incident volume by hour of day', summary.volumeByHour)}
+
+    <div class="panel">
+      <div class="section-title" style="text-transform:uppercase;color:var(--color-text-dim);font-size:0.75rem;">Coverage gaps (incident demand vs. currently available ambulances)</div>
+      <div id="coverage-map"></div>
+      <p class="muted" id="coverage-legend"></p>
+      <div class="section-title" style="text-transform:uppercase;color:var(--color-text-dim);font-size:0.75rem;">Repositioning suggestions</div>
+      <div id="repositioning-list"></div>
+    </div>
   `;
+
+  await renderCoverageMap();
+  await renderRepositioningSuggestions();
+}
+
+let coverageMap = null;
+
+// Where incident demand has historically clustered, cross-referenced with
+// how far the nearest currently-available ambulance actually is right now --
+// a strategic positioning view (proposal Sec 1.4 "resource planning"), not a
+// live dispatch tool. Straight-line distance only (see analyticsService.
+// getCoverageGrid) -- good enough to spot a gap worth investigating, not a
+// substitute for the OSRM-ranked dispatch algorithm itself.
+async function renderCoverageMap() {
+  const mapEl = document.getElementById('coverage-map');
+  if (!mapEl) return;
+
+  let data;
+  try {
+    data = await apiGet('/api/admin/analytics/coverage');
+  } catch (err) {
+    mapEl.innerHTML = errorBanner(err.message);
+    return;
+  }
+
+  const { cells, gapKmThreshold, availableAmbulanceCount } = data;
+  document.getElementById('coverage-legend').textContent = cells.length === 0
+    ? 'No incident history yet to map.'
+    : `${availableAmbulanceCount} ambulance(s) currently available. Red = nearest available unit is over ${gapKmThreshold} km away (straight-line).`;
+
+  if (cells.length === 0) return;
+
+  if (coverageMap) {
+    coverageMap.remove();
+    coverageMap = null;
+  }
+  coverageMap = L.map('coverage-map').setView([cells[0].lat, cells[0].lng], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(coverageMap);
+
+  const maxCount = Math.max(...cells.map((c) => c.incidentCount));
+  const bounds = [];
+  for (const cell of cells) {
+    const radius = 6 + (cell.incidentCount / maxCount) * 18;
+    const color = cell.isGap ? '#ef4444' : '#22c55e';
+    const marker = L.circleMarker([cell.lat, cell.lng], {
+      radius,
+      color,
+      fillColor: color,
+      fillOpacity: 0.45,
+      weight: 2,
+    }).addTo(coverageMap);
+    const distanceText = cell.nearestAvailableKm === null ? 'no ambulance currently available' : `nearest available unit ~${cell.nearestAvailableKm} km away`;
+    marker.bindTooltip(`${cell.incidentCount} incident(s) here &mdash; ${distanceText}`);
+    bounds.push([cell.lat, cell.lng]);
+  }
+  coverageMap.fitBounds(bounds, { padding: [30, 30] });
+}
+
+// Turns the coverage-gap view from passive reporting into an active
+// suggestion -- see analyticsService.getRepositioningSuggestions for the
+// System Status Management rationale (matching how AMR/MedStar dynamically
+// reposition idle units in the US, rather than leaving them parked at a
+// fixed station regardless of where demand actually is).
+async function renderRepositioningSuggestions() {
+  const list = document.getElementById('repositioning-list');
+  if (!list) return;
+
+  let suggestions;
+  try {
+    ({ suggestions } = await apiGet('/api/admin/analytics/repositioning'));
+  } catch (err) {
+    list.innerHTML = errorBanner(err.message);
+    return;
+  }
+
+  if (suggestions.length === 0) {
+    list.innerHTML = '<p class="muted">No repositioning suggestions right now -- either no coverage gaps, or no idle ambulances available to move.</p>';
+    return;
+  }
+
+  list.innerHTML = suggestions
+    .map((s) => `
+      <div class="bar-row" style="align-items:flex-start;">
+        <div class="bar-label" style="width:auto; flex:1;">
+          Move <strong>${escapeHtml(s.callSign)}</strong> ~${s.distanceKm} km toward a zone with ${s.gapIncidentCount} recent incident(s) and no nearby coverage.
+        </div>
+      </div>
+    `)
+    .join('');
+
+  if (!coverageMap) return;
+  for (const s of suggestions) {
+    L.polyline([[s.fromLat, s.fromLng], [s.toLat, s.toLng]], {
+      color: '#38bdf8',
+      weight: 2,
+      dashArray: '6, 6',
+    }).addTo(coverageMap);
+    L.circleMarker([s.fromLat, s.fromLng], {
+      radius: 6,
+      color: '#38bdf8',
+      fillColor: '#38bdf8',
+      fillOpacity: 0.9,
+      weight: 2,
+    }).addTo(coverageMap).bindTooltip(`${s.callSign} (suggested move)`);
+  }
 }
 
 init();

@@ -30,6 +30,29 @@ body { display: flex; flex-direction: column; }
   color: var(--color-accent);
 }
 
+.unit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  font-size: 1rem;
+}
+.unit-icon { font-size: 1.2rem; }
+.unit-label { font-weight: 600; }
+
+.diversion-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+}
+.diversion-bar.accepting { border-color: var(--color-success); }
+.diversion-bar.diversion { border-color: var(--color-danger); background: rgba(239, 68, 68, 0.1); }
+.diversion-controls { display: flex; gap: 0.5rem; align-items: center; }
+.diversion-controls input { width: 200px; }
+
 .ack-status {
   margin-top: 0.5rem;
   font-size: 0.85rem;

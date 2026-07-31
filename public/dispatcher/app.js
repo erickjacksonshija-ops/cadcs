@@ -36,16 +36,59 @@ let selectedIncidentId = null;
 let pinMode = false;
 let pendingPin = null; // { lat, lng }
 let pendingPinMarker = null;
+let responseTimeBenchmarkSeconds = 480; // 8 min WHO benchmark default -- overwritten from /api/auth/me's config on init
+
+// Marker motion smoothing: pings arrive as discrete snapshots, but a marker
+// that jumps between them reads as broken, not "live". Instead we animate
+// each marker from its last rendered position to the new one over roughly
+// the real gap between pings, so motion on the map looks continuous like a
+// live vehicle rather than a teleporting dot.
+const ambulanceAnimations = new Map(); // ambulanceId -> { fromLat, fromLng, toLat, toLng, startTs, durationMs }
+const lastPingClientTs = new Map(); // ambulanceId -> Date.now() of last received ping
+let animationFrameId = null;
+const MIN_ANIMATION_MS = 800;
+const MAX_ANIMATION_MS = 4000;
+
+function scheduleMarkerAnimation(ambulanceId, fromLat, fromLng, toLat, toLng, durationMs) {
+  ambulanceAnimations.set(ambulanceId, { fromLat, fromLng, toLat, toLng, startTs: performance.now(), durationMs });
+  if (!animationFrameId) animationFrameId = requestAnimationFrame(stepMarkerAnimations);
+}
+
+function stepMarkerAnimations(now) {
+  let stillAnimating = false;
+  for (const [ambulanceId, anim] of ambulanceAnimations) {
+    const marker = ambulanceMarkers.get(ambulanceId);
+    if (!marker) {
+      ambulanceAnimations.delete(ambulanceId);
+      continue;
+    }
+    const t = Math.min(1, (now - anim.startTs) / anim.durationMs);
+    const eased = 1 - (1 - t) * (1 - t); // ease-out: fast start, settles into the new ping
+    marker.setLatLng([
+      anim.fromLat + (anim.toLat - anim.fromLat) * eased,
+      anim.fromLng + (anim.toLng - anim.fromLng) * eased,
+    ]);
+    if (t < 1) {
+      stillAnimating = true;
+    } else {
+      ambulanceAnimations.delete(ambulanceId);
+    }
+  }
+  animationFrameId = stillAnimating ? requestAnimationFrame(stepMarkerAnimations) : null;
+}
 
 async function init() {
   try {
-    const { user } = await apiGet('/api/auth/me');
+    const { user, config } = await apiGet('/api/auth/me');
     if (user.role !== 'dispatcher' && user.role !== 'admin') {
       window.location.href = '/';
       return;
     }
     currentUser = user;
     document.getElementById('user-name').textContent = `${user.name} (${user.role})`;
+    if (config && config.responseTimeBenchmarkSeconds) {
+      responseTimeBenchmarkSeconds = config.responseTimeBenchmarkSeconds;
+    }
   } catch {
     return; // apiGet already redirects to '/' on 401
   }
@@ -54,6 +97,10 @@ async function init() {
   initSocket();
   await Promise.all([loadIncidents(), loadAmbulances()]);
   renderContextPanel();
+
+  // Re-renders just the incidents list so aging severity classes/timers
+  // keep advancing even when nothing else about the board has changed.
+  setInterval(renderIncidentsList, 10000);
 
   document.getElementById('new-incident-btn').addEventListener('click', startNewIncident);
   document.getElementById('logout-btn').addEventListener('click', async () => {
@@ -150,6 +197,24 @@ function initSocket() {
     console.error('Socket connection failed:', err.message);
   });
 
+  // Mission chat: only append live if the chat panel for that exact
+  // incident is currently open, otherwise it's picked up fresh next time
+  // loadMissionMessages() runs for that incident.
+  socket.on('mission:message', (message) => {
+    if (selectedIncidentId === message.incidentId) {
+      appendMissionMessage(message);
+    }
+  });
+
+  // Crew panic button -- highest-urgency alert in the app, so it gets a
+  // full-screen flash plus a persistent banner (not just a toast that can
+  // be missed), regardless of which incident is currently open.
+  socket.on('mission:sos', (alert) => {
+    flashSosAlert();
+    showSosBanner(alert);
+    if (selectedIncidentId === alert.incidentId) refreshSelectedIncident();
+  });
+
   // Keeps every dispatcher's list/map in sync, not just the one who
   // triggered the change -- the whole point of shared, cross-provider
   // visibility (see incidentService/dispatchService broadcasts).
@@ -163,6 +228,13 @@ function initSocket() {
   socket.on('incident:assigned', (incident) => {
     incidents.set(incident.id, incident);
     renderIncidentsList();
+    if (selectedIncidentId === incident.id) renderContextPanel();
+  });
+
+  socket.on('incident:priority_changed', (incident) => {
+    incidents.set(incident.id, incident);
+    renderIncidentsList();
+    renderIncidentMarkers();
     if (selectedIncidentId === incident.id) renderContextPanel();
   });
 
@@ -194,6 +266,7 @@ function upsertAmbulanceMarker(ambulanceId, lat, lng, status, meta) {
   const color = staleAmbulanceIds.has(ambulanceId) ? AMBULANCE_COLORS.stale : (AMBULANCE_COLORS[status] || AMBULANCE_COLORS.available);
   const tooltipText = ambulanceTooltipText(ambulanceId, status);
   let marker = ambulanceMarkers.get(ambulanceId);
+  const now = Date.now();
   if (!marker) {
     marker = L.circleMarker([lat, lng], {
       radius: 8,
@@ -205,10 +278,16 @@ function upsertAmbulanceMarker(ambulanceId, lat, lng, status, meta) {
     marker.bindTooltip(tooltipText);
     ambulanceMarkers.set(ambulanceId, marker);
   } else {
-    marker.setLatLng([lat, lng]);
+    const from = marker.getLatLng();
+    const lastTs = lastPingClientTs.get(ambulanceId);
+    const durationMs = lastTs
+      ? Math.min(MAX_ANIMATION_MS, Math.max(MIN_ANIMATION_MS, now - lastTs))
+      : MIN_ANIMATION_MS;
+    scheduleMarkerAnimation(ambulanceId, from.lat, from.lng, lat, lng, durationMs);
     marker.setStyle({ color, fillColor: color });
     marker.setTooltipContent(tooltipText);
   }
+  lastPingClientTs.set(ambulanceId, now);
 }
 
 async function loadAmbulances() {
@@ -246,7 +325,8 @@ function renderIncidentsList() {
 
   for (const incident of sorted) {
     const card = document.createElement('div');
-    card.className = 'incident-card' + (incident.id === selectedIncidentId ? ' selected' : '');
+    const aging = agingSeverity(incident);
+    card.className = 'incident-card' + (incident.id === selectedIncidentId ? ' selected' : '') + (aging ? ` ${aging}` : '');
     card.innerHTML = `
       <div class="top-row">
         <span class="badge ${PRIORITY_BADGE_CLASS[incident.priority]}">${incident.priority}</span>
@@ -254,10 +334,33 @@ function renderIncidentsList() {
       </div>
       <div style="margin-top:0.3rem;">${escapeHtml(incident.chief_complaint)}</div>
       <div class="muted">${escapeHtml(incident.location_description) || 'No description'}</div>
+      ${aging ? `<div class="aging-text">Unassigned ${formatElapsed(incident.reported_at)}</div>` : ''}
     `;
     card.addEventListener('click', () => selectIncident(incident.id));
     container.appendChild(card);
   }
+}
+
+// Live SLA-aging: an unassigned incident should visibly escalate on the
+// board as it approaches the WHO response-time benchmark, not just get
+// scored against it after the fact in analytics -- gives the dispatcher a
+// chance to act before the benchmark is actually breached, not just a
+// post-mortem number.
+function agingSeverity(incident) {
+  if (incident.status !== 'reported') return null;
+  const elapsedSeconds = (Date.now() - new Date(incident.reported_at).getTime()) / 1000;
+  const ratio = elapsedSeconds / responseTimeBenchmarkSeconds;
+  if (ratio >= 1) return 'aging-breached';
+  if (ratio >= 0.75) return 'aging-critical';
+  if (ratio >= 0.5) return 'aging-warning';
+  return null;
+}
+
+function formatElapsed(reportedAt) {
+  const totalSeconds = Math.max(0, Math.floor((Date.now() - new Date(reportedAt).getTime()) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
 }
 
 function renderIncidentMarkers() {
@@ -312,6 +415,7 @@ async function refreshSelectedIncident() {
 function renderContextPanel() {
   const panel = document.getElementById('context-panel');
   if (pinMode || pendingPin) {
+    stopEtaPolling();
     renderNewIncidentForm(panel);
     return;
   }
@@ -319,6 +423,7 @@ function renderContextPanel() {
     renderIncidentDetail(panel, incidents.get(selectedIncidentId));
     return;
   }
+  stopEtaPolling();
   panel.innerHTML = '<p class="muted">Select an incident, or create a new one, to see details here.</p>';
 }
 
@@ -401,6 +506,7 @@ function renderNewIncidentForm(panel) {
     <div class="section-title">New Incident</div>
     <p class="muted">Location: ${pendingPin.lat.toFixed(5)}, ${pendingPin.lng.toFixed(5)}
       <a href="#" id="repin">(change)</a></p>
+    <div id="duplicate-check"></div>
 
     <label for="chiefComplaint">Chief complaint</label>
     <select id="chiefComplaint">
@@ -439,6 +545,42 @@ function renderNewIncidentForm(panel) {
   });
   document.getElementById('cancel-new').addEventListener('click', cancelNewIncident);
   document.getElementById('submit-incident').addEventListener('click', submitNewIncident);
+  checkNearbyDuplicates(pendingPin.lat, pendingPin.lng);
+}
+
+// Advisory only -- flags open incidents reported near this pin in the last
+// ~20 minutes so a dispatcher can spot "this is probably the same crash a
+// different caller just reported" before creating a redundant incident and
+// double-dispatching a second ambulance to one scene.
+async function checkNearbyDuplicates(lat, lng) {
+  const box = document.getElementById('duplicate-check');
+  if (!box) return;
+  try {
+    const { incidents: nearby } = await apiGet(`/api/incidents/nearby-open?lat=${lat}&lng=${lng}`);
+    if (nearby.length === 0) {
+      box.innerHTML = '';
+      return;
+    }
+    box.innerHTML = `
+      <div class="duplicate-warning">
+        <strong>Possible duplicate report${nearby.length > 1 ? 's' : ''} nearby:</strong>
+        ${nearby.map((n) => `
+          <div class="duplicate-row" data-id="${n.id}">
+            #${n.id} &middot; ${escapeHtml(n.chief_complaint)} &middot; ${Math.round(n.distance_meters)}m away &middot; ${new Date(n.reported_at).toLocaleTimeString()}
+          </div>
+        `).join('')}
+        <p class="muted" style="margin-top:0.3rem;">Click one to view it instead, or continue below if this is a genuinely separate call.</p>
+      </div>
+    `;
+    box.querySelectorAll('.duplicate-row').forEach((el) => {
+      el.addEventListener('click', () => {
+        cancelNewIncident();
+        selectIncident(Number(el.dataset.id));
+      });
+    });
+  } catch {
+    box.innerHTML = ''; // advisory check only -- fail silent, never block incident creation
+  }
 }
 
 function cancelNewIncident() {
@@ -481,6 +623,29 @@ async function submitNewIncident() {
   }
 }
 
+// Statuses for which /:id/eta can return something meaningful -- mirrors
+// ETA_TARGETS_SCENE + 'transporting' on the server (see routes/incidents.js).
+const ETA_APPLICABLE_STATUSES = ['assigned', 'dispatched', 'en_route', 'on_scene', 'transporting'];
+
+const PRE_ARRIVAL_APPLICABLE_STATUSES = ['reported', 'assigned', 'dispatched', 'en_route'];
+
+async function loadPreArrivalInstructions(incidentId) {
+  const container = document.getElementById('pre-arrival-container');
+  if (!container) return;
+  container.innerHTML = '<p class="muted">Loading&hellip;</p>';
+  try {
+    const { title, steps } = await apiGet(`/api/incidents/${incidentId}/pre-arrival-instructions`);
+    container.innerHTML = `
+      <div class="pre-arrival-card">
+        <strong>${escapeHtml(title)}</strong>
+        <ol>${steps.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}</ol>
+      </div>
+    `;
+  } catch (err) {
+    container.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+  }
+}
+
 function renderIncidentDetail(panel, incident) {
   // Ranking/assignment only makes sense before an ambulance has been
   // claimed -- once assigned, the incident is tracked read-only here as
@@ -500,17 +665,57 @@ function renderIncidentDetail(panel, incident) {
     ? `<button class="danger" id="cancel-incident-btn" style="width:100%; margin-top:1rem;">Cancel incident</button>`
     : '';
 
+  const etaSection = ETA_APPLICABLE_STATUSES.includes(incident.status)
+    ? `<p class="muted" id="live-eta">Fetching live ETA&hellip;</p>`
+    : '';
+
+  // Only useful while the dispatcher might still be coaching the caller --
+  // once crew is physically on scene, the caller is being cared for
+  // directly and doesn't need phone instructions anymore.
+  const preArrivalSection = PRE_ARRIVAL_APPLICABLE_STATUSES.includes(incident.status)
+    ? `
+      <button class="secondary" id="pre-arrival-btn" style="width:100%; margin-top:0.5rem;">Pre-arrival instructions</button>
+      <div id="pre-arrival-container"></div>
+    `
+    : '';
+
+  // Chat only makes sense once a specific crew is actually attached to
+  // this incident -- before that ('reported'), there's no ambulance room
+  // to reach on the other end.
+  const chatSection = incident.assigned_ambulance_id
+    ? `
+      <div class="section-title">Mission Chat</div>
+      <div id="mission-chat-log" class="chat-log"></div>
+      <div class="field-row">
+        <input id="mission-chat-input" placeholder="Message the crew..." maxlength="500" />
+        <button id="mission-chat-send" style="flex:0;">Send</button>
+      </div>
+    `
+    : '';
+
+  // Re-triage is only meaningful while the incident is still active --
+  // matches the same closed/cancelled guard dispatchService.escalatePriority
+  // enforces server-side.
+  const priorityChangeSection = !['closed', 'cancelled'].includes(incident.status)
+    ? `<a href="#" id="change-priority-link" class="muted" style="margin-left:0.5rem;">change</a>
+       <div id="priority-change-form"></div>`
+    : '';
+
   panel.innerHTML = `
     <div id="detail-error"></div>
     <div class="section-title">Incident #${incident.id}</div>
     <span class="badge ${PRIORITY_BADGE_CLASS[incident.priority]}">${incident.priority}</span>
     <span class="muted">${incident.required_capability} required</span>
+    ${priorityChangeSection}
     <p><strong>${escapeHtml(incident.chief_complaint)}</strong></p>
     <p class="muted">${escapeHtml(incident.location_description) || 'No description'}</p>
     ${incident.patient_notes ? `<p>${escapeHtml(incident.patient_notes)}</p>` : ''}
     <p class="muted">Status: ${incident.status}</p>
+    ${etaSection}
+    ${preArrivalSection}
 
     ${candidatesSection}
+    ${chatSection}
     <button class="secondary" id="view-timeline-btn" style="width:100%; margin-top:0.75rem;">View audit timeline</button>
     <div id="timeline-container"></div>
     ${cancelSection}
@@ -523,6 +728,151 @@ function renderIncidentDetail(panel, incident) {
   if (cancelBtn) cancelBtn.addEventListener('click', () => promptCancelIncident(incident.id));
 
   document.getElementById('view-timeline-btn').addEventListener('click', () => loadTimeline(incident.id));
+
+  const preArrivalBtn = document.getElementById('pre-arrival-btn');
+  if (preArrivalBtn) preArrivalBtn.addEventListener('click', () => loadPreArrivalInstructions(incident.id));
+
+  const changePriorityLink = document.getElementById('change-priority-link');
+  if (changePriorityLink) {
+    changePriorityLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      renderPriorityChangeForm(incident);
+    });
+  }
+
+  if (document.getElementById('mission-chat-input')) {
+    loadMissionMessages(incident.id);
+    document.getElementById('mission-chat-send').addEventListener('click', () => sendMissionMessage(incident));
+    document.getElementById('mission-chat-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); sendMissionMessage(incident); }
+    });
+  }
+
+  if (ETA_APPLICABLE_STATUSES.includes(incident.status)) {
+    startEtaPolling(incident.id);
+  } else {
+    stopEtaPolling();
+  }
+}
+
+const PRIORITIES = ['P1', 'P2', 'P3'];
+
+// Mid-incident re-triage (see plan: "Mid-incident priority escalation") --
+// separate from the triage suggestion shown at creation time. A reason is
+// always required so the audit timeline shows why urgency changed, not
+// just that it did.
+function renderPriorityChangeForm(incident) {
+  const container = document.getElementById('priority-change-form');
+  if (!container) return;
+  container.innerHTML = `
+    <div class="priority-change-card">
+      <label for="priority-select">New priority</label>
+      <select id="priority-select">
+        ${PRIORITIES.map((p) => `<option value="${p}" ${p === incident.priority ? 'selected' : ''}>${p}</option>`).join('')}
+      </select>
+      <label for="priority-reason">Reason (required)</label>
+      <input id="priority-reason" placeholder="e.g. caller reports patient now unresponsive" />
+      <div id="priority-change-error"></div>
+      <button id="submit-priority-change" style="width:100%; margin-top:0.4rem;">Update priority</button>
+      <button class="secondary" id="cancel-priority-change" style="width:100%; margin-top:0.3rem;">Cancel</button>
+    </div>
+  `;
+  document.getElementById('cancel-priority-change').addEventListener('click', () => {
+    container.innerHTML = '';
+  });
+  document.getElementById('submit-priority-change').addEventListener('click', () => submitPriorityChange(incident.id));
+}
+
+async function submitPriorityChange(incidentId) {
+  const errorBox = document.getElementById('priority-change-error');
+  const priority = document.getElementById('priority-select').value;
+  const reason = document.getElementById('priority-reason').value.trim();
+  errorBox.innerHTML = '';
+  try {
+    const { incident } = await apiPost(`/api/incidents/${incidentId}/priority`, { priority, reason });
+    incidents.set(incident.id, incident);
+    renderIncidentsList();
+    renderContextPanel();
+  } catch (err) {
+    errorBox.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function loadMissionMessages(incidentId) {
+  const log = document.getElementById('mission-chat-log');
+  if (!log) return;
+  log.innerHTML = '<p class="muted">Loading messages&hellip;</p>';
+  try {
+    const { messages } = await apiGet(`/api/incidents/${incidentId}/messages`);
+    renderMissionChatLog(messages);
+  } catch (err) {
+    log.innerHTML = `<div class="error-banner">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderMissionChatLog(messages) {
+  const log = document.getElementById('mission-chat-log');
+  if (!log) return;
+  log.innerHTML = messages.length === 0 ? '<p class="muted">No messages yet.</p>' : '';
+  messages.forEach(appendMissionMessage);
+}
+
+function appendMissionMessage(message) {
+  const log = document.getElementById('mission-chat-log');
+  if (!log || selectedIncidentId !== message.incidentId) return;
+  const placeholder = log.querySelector('.muted');
+  if (placeholder) placeholder.remove();
+  const row = document.createElement('div');
+  row.className = `chat-msg chat-msg-${message.senderRole}`;
+  row.innerHTML = `
+    <span class="chat-msg-sender">${escapeHtml(message.senderName)}</span>
+    <span class="chat-msg-body">${escapeHtml(message.body)}</span>
+    <span class="chat-msg-time muted">${new Date(message.sentAt).toLocaleTimeString()}</span>
+  `;
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+}
+
+function sendMissionMessage(incident) {
+  const input = document.getElementById('mission-chat-input');
+  const body = input.value.trim();
+  if (!body) return;
+  socket.emit('mission:message', { ambulanceId: incident.assigned_ambulance_id, body });
+  input.value = '';
+}
+
+// Recomputes ETA from the assigned ambulance's live GPS position every 20s
+// (see GET /api/incidents/:id/eta) so the dispatcher sees a countdown that
+// actually ticks down, instead of a number frozen at assignment time --
+// matches how ride-hailing apps keep a rider's ETA live during the trip.
+const ETA_POLL_INTERVAL_MS = 20000;
+let etaPollTimerId = null;
+let etaPollIncidentId = null;
+
+function stopEtaPolling() {
+  if (etaPollTimerId) clearInterval(etaPollTimerId);
+  etaPollTimerId = null;
+  etaPollIncidentId = null;
+}
+
+function startEtaPolling(incidentId) {
+  if (etaPollIncidentId === incidentId) return; // already polling this one
+  stopEtaPolling();
+  etaPollIncidentId = incidentId;
+  fetchAndRenderEta(incidentId);
+  etaPollTimerId = setInterval(() => fetchAndRenderEta(incidentId), ETA_POLL_INTERVAL_MS);
+}
+
+async function fetchAndRenderEta(incidentId) {
+  const el = document.getElementById('live-eta');
+  if (!el || selectedIncidentId !== incidentId) return; // panel moved on -- drop this tick
+  try {
+    const { etaSeconds, target } = await apiGet(`/api/incidents/${incidentId}/eta`);
+    const label = target === 'hospital' ? 'to hospital' : 'to scene';
+    el.textContent = `Live ETA ${label}: ${Math.round(etaSeconds / 60)} min`;
+  } catch (err) {
+    el.textContent = 'Live ETA unavailable right now';
+  }
 }
 
 // The append-only incident_events record (see auditService/
@@ -543,7 +893,42 @@ const EVENT_LABELS = {
   hospital_acknowledged: 'Hospital acknowledged',
   cancelled: 'Cancelled',
   closed: 'Closed',
+  sos_triggered: 'Crew SOS triggered',
+  priority_changed: 'Priority changed',
 };
+
+function flashSosAlert() {
+  document.body.style.transition = 'none';
+  document.body.style.backgroundColor = '#dc2626';
+  requestAnimationFrame(() => {
+    document.body.style.transition = 'background-color 1.5s';
+    document.body.style.backgroundColor = '';
+  });
+}
+
+// Stacks (doesn't replace) so multiple concurrent SOS alerts from different
+// crews all stay visible until a dispatcher explicitly acts on or dismisses
+// each one -- this is the highest-urgency signal in the app and must never
+// silently get overwritten by the next one.
+function showSosBanner(alert) {
+  const container = document.getElementById('sos-banner-container');
+  const banner = document.createElement('div');
+  banner.className = 'sos-banner';
+  const label = alert.callSign ? escapeHtml(alert.callSign) : `Ambulance #${alert.ambulanceId}`;
+  banner.innerHTML = `
+    <span><strong>SOS</strong> &mdash; ${label} needs assistance (Incident #${alert.incidentId}) &mdash; ${new Date(alert.triggeredAt).toLocaleTimeString()}</span>
+    <div>
+      <button class="view-sos-btn">View incident</button>
+      <button class="secondary dismiss-sos-btn">Dismiss</button>
+    </div>
+  `;
+  banner.querySelector('.view-sos-btn').addEventListener('click', () => {
+    selectIncident(alert.incidentId);
+    banner.remove();
+  });
+  banner.querySelector('.dismiss-sos-btn').addEventListener('click', () => banner.remove());
+  container.appendChild(banner);
+}
 
 function formatEventMetadata(eventType, metadata) {
   if (!metadata) return '';
@@ -555,6 +940,9 @@ function formatEventMetadata(eventType, metadata) {
   }
   if (eventType === 'cancelled' && metadata.reason) {
     return escapeHtml(metadata.reason);
+  }
+  if (eventType === 'priority_changed' && metadata.from && metadata.to) {
+    return `${metadata.from} &rarr; ${metadata.to}${metadata.reason ? ` &mdash; ${escapeHtml(metadata.reason)}` : ''}`;
   }
   if (eventType === 'candidates_ranked') {
     const count = Array.isArray(metadata.candidates) ? metadata.candidates.length : 0;

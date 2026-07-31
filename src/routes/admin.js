@@ -358,4 +358,25 @@ router.get('/analytics', requireRole(ROLES.ADMIN), async (_req, res, next) => {
   }
 });
 
+// Coverage-gap grid: historical incident demand binned onto a map grid,
+// paired with each cell's distance to the nearest currently-available
+// ambulance -- see analyticsService.getCoverageGrid for the full rationale.
+router.get('/analytics/coverage', requireRole(ROLES.ADMIN), async (_req, res, next) => {
+  try {
+    res.json(await analyticsService.getCoverageGrid());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Proactive repositioning suggestions -- see analyticsService.
+// getRepositioningSuggestions for the System Status Management rationale.
+router.get('/analytics/repositioning', requireRole(ROLES.ADMIN), async (_req, res, next) => {
+  try {
+    res.json(await analyticsService.getRepositioningSuggestions());
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

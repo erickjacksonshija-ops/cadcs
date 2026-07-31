@@ -6,7 +6,7 @@ const { POINT_SQL, latLngColumns } = require('./geo');
 // why the axis order matters here.
 const SELECT_COLUMNS = `
   id, name, ${latLngColumns('location')},
-  address, contact_phone, active, created_at
+  address, contact_phone, active, diversion_status, diversion_reason, diversion_set_at, created_at
 `;
 
 async function createHospital({ name, lat, lng, address, contactPhone }) {
@@ -39,6 +39,7 @@ async function list({ activeOnly = true } = {}) {
 async function listWithDistanceFrom(lat, lng, { activeOnly = true } = {}) {
   const [rows] = await pool.query(
     `SELECT id, name, ${latLngColumns('location')}, address, contact_phone,
+       diversion_status, diversion_reason,
        ST_Distance_Sphere(location, ST_SRID(POINT(:lat, :lng), 4326)) AS haversine_meters
      FROM hospitals
      ${activeOnly ? 'WHERE active = 1' : ''}
@@ -46,6 +47,21 @@ async function listWithDistanceFrom(lat, lng, { activeOnly = true } = {}) {
     { lat, lng }
   );
   return rows;
+}
+
+// Hospital staff self-report their own facility's capacity -- advisory
+// only (see migration 012's rationale). setByUserId isn't persisted on the
+// hospitals row itself (no audit trail there), but callers that care about
+// who changed it should log their own event.
+async function setDiversionStatus(id, { status, reason }) {
+  const existing = await findById(id);
+  if (!existing) return null;
+  await pool.query(
+    `UPDATE hospitals SET diversion_status = :status, diversion_reason = :reason, diversion_set_at = NOW(3)
+     WHERE id = :id`,
+    { id, status, reason: reason || null }
+  );
+  return findById(id);
 }
 
 // Editable fields only -- excludes `active`, handled separately by
@@ -79,4 +95,12 @@ async function setActive(id, active) {
   return findById(id);
 }
 
-module.exports = { createHospital, findById, list, listWithDistanceFrom, updateHospital, setActive };
+module.exports = {
+  createHospital,
+  findById,
+  list,
+  listWithDistanceFrom,
+  updateHospital,
+  setActive,
+  setDiversionStatus,
+};

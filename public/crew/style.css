@@ -55,3 +55,39 @@ body { display: flex; flex-direction: column; }
 }
 .gps-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); }
 .gps-dot.off { background: var(--color-text-dim); }
+
+.chat-log {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.5rem;
+  margin-bottom: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.chat-msg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
+  background: var(--color-panel-light);
+}
+.chat-msg-dispatcher, .chat-msg-admin { border-left: 3px solid #22c55e; }
+.chat-msg-crew { border-left: 3px solid var(--color-accent); }
+.chat-msg-sender { font-weight: 600; }
+.chat-msg-time { font-size: 0.7rem; margin-left: auto; }
+
+#sos-btn {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+#sos-btn:disabled {
+  background: var(--color-text-dim);
+  border-color: var(--color-text-dim);
+  opacity: 1;
+}

@@ -73,3 +73,105 @@ body { display: flex; flex-direction: column; }
 .search-result:hover {
   border-color: var(--color-accent);
 }
+
+.chat-log {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.5rem;
+  margin-bottom: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.chat-msg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
+  background: var(--color-panel-light);
+}
+.chat-msg-crew { border-left: 3px solid var(--color-accent); }
+.chat-msg-dispatcher, .chat-msg-admin { border-left: 3px solid #22c55e; }
+.chat-msg-sender { font-weight: 600; }
+.chat-msg-time { font-size: 0.7rem; margin-left: auto; }
+
+#sos-banner-container {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.sos-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  background: #dc2626;
+  color: white;
+  padding: 0.6rem 1rem;
+  font-weight: 600;
+}
+.sos-banner button { background: white; color: #dc2626; border: none; }
+.sos-banner button.secondary { background: transparent; color: white; border: 1px solid white; }
+
+.duplicate-warning {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid var(--color-p2);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.6rem;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+}
+.duplicate-row {
+  padding: 0.35rem 0.4rem;
+  margin-top: 0.3rem;
+  border-radius: var(--radius);
+  background: var(--color-panel-light);
+  cursor: pointer;
+}
+.duplicate-row:hover { outline: 1px solid var(--color-accent); }
+
+.pre-arrival-card {
+  background: var(--color-panel-light);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+}
+.pre-arrival-card ol { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+.pre-arrival-card li { margin-bottom: 0.35rem; }
+
+.priority-change-card {
+  background: var(--color-panel-light);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  margin-top: 0.4rem;
+}
+
+/* Live SLA-aging (see plan: "Live SLA-aging alert") -- an unassigned
+   incident escalates visually as it approaches the WHO response-time
+   benchmark, not just after the fact in analytics. */
+.incident-card.aging-warning { border-left: 4px solid var(--color-p2); }
+.incident-card.aging-critical { border-left: 4px solid #f97316; }
+.incident-card.aging-breached {
+  border-left: 4px solid var(--color-danger);
+  animation: aging-pulse 1.4s infinite;
+}
+.aging-text { font-size: 0.75rem; color: var(--color-danger); margin-top: 0.3rem; font-weight: 600; }
+.incident-card.aging-warning .aging-text { color: var(--color-p2); }
+.incident-card.aging-critical .aging-text { color: #f97316; }
+
+@keyframes aging-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}

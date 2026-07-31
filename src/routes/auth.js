@@ -85,8 +85,16 @@ router.post('/logout', requireAuth, async (req, res, next) => {
   });
 });
 
+// config here is intentionally small and dispatcher-board-relevant only --
+// responseTimeBenchmarkSeconds lets the dispatcher UI flag an unassigned
+// incident approaching the WHO benchmark live (see plan: "Live SLA-aging
+// alert"), instead of that benchmark only ever showing up after the fact
+// in analytics.
 router.get('/me', requireAuth, (req, res) => {
-  res.json({ user: req.session.user });
+  res.json({
+    user: req.session.user,
+    config: { responseTimeBenchmarkSeconds: env.responseTimeBenchmarkSeconds },
+  });
 });
 
 module.exports = router;

@@ -56,3 +56,10 @@ form button { width: 100%; margin-top: 0.75rem; }
 .bar-row .bar-track { flex: 1; background: var(--color-bg); border-radius: 4px; height: 10px; overflow: hidden; }
 .bar-row .bar-fill { height: 100%; background: var(--color-accent); }
 .bar-row .bar-count { width: 30px; text-align: right; }
+
+#coverage-map {
+  height: 360px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  margin-top: 0.5rem;
+}

@@ -122,6 +122,40 @@ async function findById(id) {
   return rows[0] || null;
 }
 
+// Open incidents reported near this location in the last few minutes -- the
+// concrete fix for the single most common real 911 operational problem:
+// several different callers reporting the same scene (a crash, a fire)
+// getting treated as separate incidents and double-dispatched. Advisory
+// only -- the dispatcher decides whether it's a genuine duplicate or a
+// second, distinct call that happens to be nearby.
+async function findNearbyOpen(lat, lng, { withinMeters = 300, withinMinutes = 20 } = {}) {
+  const [rows] = await pool.query(
+    `SELECT id, priority, chief_complaint, location_description, status, reported_at,
+            ST_Distance_Sphere(location, ${POINT_SQL}) AS distance_meters
+     FROM incidents
+     WHERE status NOT IN ('closed', 'cancelled')
+       AND reported_at >= DATE_SUB(NOW(), INTERVAL :withinMinutes MINUTE)
+       HAVING distance_meters <= :withinMeters
+     ORDER BY distance_meters ASC`,
+    { lat, lng, withinMinutes, withinMeters }
+  );
+  return rows;
+}
+
+// The mission an ambulance is currently on, if any -- same "not yet closed/
+// cancelled" scoping as routes/incidents.js's GET /mine. Used by the
+// mission-chat socket handler to resolve which incident a crew<->dispatcher
+// message attaches to from just an ambulanceId.
+async function findActiveByAmbulanceId(ambulanceId) {
+  const [rows] = await pool.query(
+    `SELECT ${SELECT_COLUMNS} FROM incidents
+     WHERE assigned_ambulance_id = :ambulanceId AND status NOT IN ('closed', 'cancelled')
+     ORDER BY reported_at DESC LIMIT 1`,
+    { ambulanceId }
+  );
+  return rows[0] || null;
+}
+
 // activeOnly: everything the dispatcher should still be tracking on the
 // live board -- not just 'reported'/'assigned', but all the way through
 // the crew-driven lifecycle (en_route/on_scene/transporting/at_hospital)
@@ -144,4 +178,4 @@ async function list({ status, activeOnly } = {}) {
   return rows;
 }
 
-module.exports = { createIncident, findById, list, ValidationError };
+module.exports = { createIncident, findById, findActiveByAmbulanceId, findNearbyOpen, list, ValidationError };

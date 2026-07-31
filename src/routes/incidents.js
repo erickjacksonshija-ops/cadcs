@@ -7,6 +7,9 @@ const dispatchService = require('../services/dispatchService');
 const auditService = require('../services/auditService');
 const routingService = require('../services/routingService');
 const ambulanceService = require('../services/ambulanceService');
+const hospitalService = require('../services/hospitalService');
+const missionMessageService = require('../services/missionMessageService');
+const preArrivalInstructionsService = require('../services/preArrivalInstructionsService');
 const { serializeIncidentForRole } = require('../services/incidentSerializer');
 const { findCurrentAmbulanceForCrew } = require('../sockets/rooms');
 const requireRole = require('../middleware/requireRole');
@@ -98,6 +101,25 @@ router.get('/mine', requireRole(ROLES.CREW), async (req, res, next) => {
     next(err);
   }
 });
+
+// Must be registered before GET '/:id' -- same reason as '/mine' above.
+// Advisory duplicate-call check, run against the pending pin location
+// before an incident is actually created (see incidentService.findNearbyOpen).
+router.get(
+  '/nearby-open',
+  requireRole(ROLES.DISPATCHER, ROLES.ADMIN),
+  query('lat').isFloat({ min: -90, max: 90 }),
+  query('lng').isFloat({ min: -180, max: 180 }),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const incidents = await incidentService.findNearbyOpen(Number(req.query.lat), Number(req.query.lng));
+      res.json({ incidents });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 router.get('/:id', requireRole(ROLES.DISPATCHER, ROLES.ADMIN), async (req, res, next) => {
   try {
@@ -243,6 +265,109 @@ router.get('/:id/route', requireRole(ROLES.CREW), param('id').isInt(), async (re
   }
 });
 
+// Live ETA for the dispatcher-facing map, recomputed on demand from the
+// assigned ambulance's current GPS position -- unlike hospital_notifications'
+// eta_snapshot_seconds (a one-time value taken at the moment transport
+// started), this reflects wherever the ambulance actually is right now, so
+// polling this endpoint gives a countdown that genuinely ticks down rather
+// than a number frozen at dispatch/transport time. Destination is the
+// incident scene until transport begins, then switches to the assigned
+// hospital -- mirrors the same before/after-transport distinction
+// dispatchService.updateMissionStatus already encodes in incident.status.
+const ETA_TARGETS_SCENE = ['assigned', 'dispatched', 'en_route', 'on_scene'];
+
+router.get('/:id/eta', requireRole(ROLES.DISPATCHER, ROLES.ADMIN), param('id').isInt(), async (req, res, next) => {
+  if (!handleValidation(req, res)) return;
+  try {
+    const incident = await incidentService.findById(req.params.id);
+    if (!incident) return res.status(404).json({ error: 'Incident not found' });
+    if (!incident.assigned_ambulance_id) {
+      return res.status(409).json({ error: 'No ambulance assigned to this incident yet' });
+    }
+
+    const ambulance = await ambulanceService.findById(incident.assigned_ambulance_id);
+    if (!ambulance || ambulance.lat === null || ambulance.lng === null) {
+      return res.status(409).json({ error: 'Ambulance has no known position yet' });
+    }
+
+    let destination;
+    let target;
+    if (ETA_TARGETS_SCENE.includes(incident.status)) {
+      destination = { lat: incident.lat, lng: incident.lng };
+      target = 'incident';
+    } else if (incident.status === 'transporting') {
+      if (!incident.assigned_hospital_id) {
+        return res.status(409).json({ error: 'No destination hospital set yet' });
+      }
+      const hospital = await hospitalService.findById(incident.assigned_hospital_id);
+      if (!hospital) return res.status(409).json({ error: 'Destination hospital not found' });
+      destination = { lat: hospital.lat, lng: hospital.lng };
+      target = 'hospital';
+    } else {
+      return res.status(409).json({ error: `ETA not applicable for status '${incident.status}'` });
+    }
+
+    const route = await routingService.getRoute({ lat: ambulance.lat, lng: ambulance.lng }, destination);
+    res.json({ etaSeconds: Math.round(route.durationSeconds), distanceMeters: route.distanceMeters, target });
+  } catch (err) {
+    if (err instanceof routingService.OsrmUnavailableError) {
+      return res.status(503).json({ error: 'Routing service unavailable' });
+    }
+    next(err);
+  }
+});
+
+// Message history for the crew<->dispatcher chat channel (see
+// sockets/index.js's 'mission:message' handler, which persists new
+// messages). Dispatchers/admins can read any incident's history; crew can
+// only read the history of the incident currently assigned to their own
+// ambulance, same restriction as GET /:id/route.
+router.get(
+  '/:id/messages',
+  requireRole(ROLES.DISPATCHER, ROLES.ADMIN, ROLES.CREW),
+  param('id').isInt(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const incident = await incidentService.findById(req.params.id);
+      if (!incident) return res.status(404).json({ error: 'Incident not found' });
+
+      if (req.session.user.role === ROLES.CREW) {
+        const ambulanceId = await findCurrentAmbulanceForCrew(req.session.user.id);
+        if (!ambulanceId || incident.assigned_ambulance_id !== ambulanceId) {
+          return res.status(403).json({ error: 'This incident is not assigned to your ambulance' });
+        }
+      }
+
+      res.json({ messages: await missionMessageService.listForIncident(req.params.id) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// Pre-arrival instructions (see plan: "Pre-arrival instructions reference
+// card") -- generic lay-rescuer first-aid steps for the dispatcher to read
+// to the caller while the ambulance is en route, derived from this
+// incident's own recorded chief complaint/red flags rather than a
+// separately-entered value, so it always matches what was actually triaged.
+router.get(
+  '/:id/pre-arrival-instructions',
+  requireRole(ROLES.DISPATCHER, ROLES.ADMIN),
+  param('id').isInt(),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const incident = await incidentService.findById(req.params.id);
+      if (!incident) return res.status(404).json({ error: 'Incident not found' });
+      const redFlags = typeof incident.red_flags === 'string' ? JSON.parse(incident.red_flags) : incident.red_flags;
+      res.json(preArrivalInstructionsService.getInstructions(incident.chief_complaint, redFlags));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // Crew-initiated status update (never GPS-inferred -- see dispatchService).
 router.post(
   '/:id/status',
@@ -260,6 +385,35 @@ router.post(
         req.body.hospitalId
       );
       res.json({ incident: serializeIncidentForRole(incident, ROLES.CREW) });
+    } catch (err) {
+      if (err instanceof dispatchService.ValidationError) {
+        return res.status(err.status).json({ error: err.message });
+      }
+      next(err);
+    }
+  }
+);
+
+// Mid-incident priority re-triage (see plan: "Mid-incident priority
+// escalation") -- distinct from the initial triage suggestion/override at
+// creation time. A reason is required so the audit trail always shows why
+// urgency changed mid-response, not just that it did.
+router.post(
+  '/:id/priority',
+  requireRole(ROLES.DISPATCHER, ROLES.ADMIN),
+  param('id').isInt(),
+  body('priority').isIn(triageService.PRIORITIES),
+  body('reason').isString().trim().isLength({ min: 3 }),
+  async (req, res, next) => {
+    if (!handleValidation(req, res)) return;
+    try {
+      const incident = await dispatchService.escalatePriority(
+        req.params.id,
+        req.session.user.id,
+        req.body.priority,
+        req.body.reason
+      );
+      res.json({ incident });
     } catch (err) {
       if (err instanceof dispatchService.ValidationError) {
         return res.status(err.status).json({ error: err.message });

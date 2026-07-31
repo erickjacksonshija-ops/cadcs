@@ -71,9 +71,11 @@ async function acknowledge(notificationId, hospitalId, ackByUserId) {
 async function listForHospital(hospitalId) {
   const [rows] = await pool.query(
     `SELECT hn.id, hn.incident_id, hn.sent_at, hn.eta_snapshot_seconds, hn.acknowledged_at, hn.escalated_at,
-            i.priority, i.required_capability, i.chief_complaint, i.location_description, i.patient_notes, i.status
+            i.priority, i.required_capability, i.chief_complaint, i.location_description, i.patient_notes, i.status,
+            a.call_sign AS ambulance_call_sign, a.capability_level AS ambulance_capability_level
      FROM hospital_notifications hn
      JOIN incidents i ON i.id = hn.incident_id
+     LEFT JOIN ambulances a ON a.id = i.assigned_ambulance_id
      WHERE hn.hospital_id = :hospitalId
      ORDER BY hn.sent_at DESC
      LIMIT 50`,
@@ -102,10 +104,47 @@ async function markEscalated(notificationId) {
   });
 }
 
+// Recomputed on demand from the assigned ambulance's current GPS position --
+// unlike eta_snapshot_seconds (taken once, when transport started), this
+// reflects wherever the ambulance actually is right now. Scoped to
+// hospitalId so a hospital can only ever query its own notifications.
+async function getLiveEta(notificationId, hospitalId) {
+  const [[row]] = await pool.query(
+    `SELECT i.assigned_ambulance_id
+     FROM hospital_notifications hn
+     JOIN incidents i ON i.id = hn.incident_id
+     WHERE hn.id = :notificationId AND hn.hospital_id = :hospitalId LIMIT 1`,
+    { notificationId, hospitalId }
+  );
+  if (!row) return null;
+  if (!row.assigned_ambulance_id) return { etaSeconds: null };
+
+  const [[ambulance]] = await pool.query(
+    'SELECT ST_Y(current_location) AS lat, ST_X(current_location) AS lng FROM ambulances WHERE id = :id LIMIT 1',
+    { id: row.assigned_ambulance_id }
+  );
+  if (!ambulance || ambulance.lat === null) return { etaSeconds: null };
+
+  const [[hospital]] = await pool.query(
+    'SELECT ST_Y(location) AS lat, ST_X(location) AS lng FROM hospitals WHERE id = :hospitalId LIMIT 1',
+    { hospitalId }
+  );
+  if (!hospital) return { etaSeconds: null };
+
+  try {
+    const route = await routingService.getRoute({ lat: ambulance.lat, lng: ambulance.lng }, { lat: hospital.lat, lng: hospital.lng });
+    return { etaSeconds: Math.round(route.durationSeconds) };
+  } catch (err) {
+    if (err instanceof routingService.OsrmUnavailableError) return { etaSeconds: null, unavailable: true };
+    throw err;
+  }
+}
+
 module.exports = {
   sendPreNotification,
   acknowledge,
   listForHospital,
   findPendingEscalations,
   markEscalated,
+  getLiveEta,
 };
